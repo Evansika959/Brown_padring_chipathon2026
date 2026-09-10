@@ -12,7 +12,7 @@ from .constants import A_SLOTS, CELL_PROJECT_TERMINALS, IO_CELLS, SPEC_BLOB_SHA
 from .errors import IntegrationError
 from .info import get_lvs_config_reference, load_info, validate_pins
 from .lef import parse_lef_files, validate_project_terminals
-from .lvs import get_layout_file, load_lvs_config, resolve_downloaded_gds
+from .lvs import get_layout_file, load_lvs_config, resolve_project_data
 from .padring_cfg import audit_physical_template, generate_padring_config, safe_identifier, write_mapping
 from .padring_runner import build_padring_command, required_lef_paths, run_padring
 from .defparse import load_def
@@ -40,10 +40,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--uprj-root")
 
     s = sub.add_parser("resolve-project-gds", help="resolve the downloaded GDS selected by lvs_config.json")
-    s.add_argument("--lvs-config", type=Path)
-    s.add_argument("--gds-dir", type=Path, required=True)
+    s.add_argument("--data-root", type=Path, default=Path("data"))
     s.add_argument("--team-code", required=True)
-    s.add_argument("--project-gds", type=Path, help="explicit override")
     s.add_argument("--output", type=Path, required=True)
 
     s = sub.add_parser("audit-template", help="check an immutable 88-slot padring template")
@@ -135,20 +133,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "resolve-project-gds":
-            if args.project_gds is not None:
-                gds_path = args.project_gds
-                source = "PROJECT_GDS override"
-            else:
-                if args.lvs_config is None:
-                    raise IntegrationError("--lvs-config is required unless --project-gds is supplied")
-                config = load_lvs_config(args.lvs_config)
-                gds_path = resolve_downloaded_gds(config, team=args.team_code, gds_dir=args.gds_dir)
-                source = str(args.lvs_config)
-            if not gds_path.is_file():
-                raise IntegrationError(f"project GDS not found: {gds_path}")
+            info_path, lvs_path, gds_path = resolve_project_data(args.data_root, args.team_code)
             result = {
                 "project_gds": str(gds_path.resolve()),
-                "selection_source": source,
+                "info_yaml": str(info_path.resolve()),
+                "selection_source": str(lvs_path.resolve()),
             }
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

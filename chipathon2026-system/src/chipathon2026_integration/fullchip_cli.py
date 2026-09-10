@@ -22,6 +22,7 @@ from .fullchip import (
     write_top_verilog,
 )
 from .padring_runner import required_lef_paths, run_padring
+from .fullchip_lvs import ensure_lvs_root, generate_lvs_configs
 
 
 SYSTEM_ROOT = Path(__file__).resolve().parents[2]
@@ -32,13 +33,16 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Chipathon 2026 full-chip integration")
     p.add_argument("integration_yaml", type=Path)
     p.add_argument("--base-chip", type=Path, help="override only the base-chip YAML path")
-    p.add_argument("--info-root", type=Path, default=Path("info"))
+    p.add_argument("--data-root", type=Path, default=Path("data"))
     p.add_argument("--project-root", type=Path, default=Path("build/padframes"))
-    p.add_argument("--gds-root", type=Path, default=Path("gds"))
     p.add_argument("--template", type=Path, default=SYSTEM_ROOT / "padring_template.cfg")
     p.add_argument("--padring", type=Path, required=True)
     p.add_argument("--tech-pdk", type=Path, required=True)
     p.add_argument("--output-root", type=Path, required=True)
+    p.add_argument("--lvs-root", type=Path, default=Path("build/tools/extra_be_checks"))
+    p.add_argument("--lvs-output-root", type=Path)
+    p.add_argument("--pdk-root", type=Path, default=Path("/foss/pdks"))
+    p.add_argument("--pdk", default="gf180mcuD")
     p.add_argument("--klayout", type=Path, default=Path("klayout"))
     p.add_argument("--def2stream", type=Path, default=REPOSITORY_ROOT / "Workshop_CASS/def2stream.py")
     p.add_argument("--gds-script", type=Path, default=SYSTEM_ROOT / "scripts/fullchip_gds.py")
@@ -122,9 +126,8 @@ def main(argv: list[str] | None = None) -> int:
         output.mkdir(parents=True, exist_ok=True)
         artifacts = tuple(
             discover_project(
-                request, base_chip=chip.base_chip, info_root=args.info_root,
+                request, base_chip=chip.base_chip, data_root=args.data_root,
                 project_root=args.project_root,
-                gds_root=args.gds_root,
             )
             for request in chip.projects
         )
@@ -277,9 +280,27 @@ def main(argv: list[str] | None = None) -> int:
             "outputs": {str(path): file_sha256(path) for path in outputs},
         }
         json_dump(manifest_path, manifest)
+        lvs_output_root = args.lvs_output_root or output / "lvs"
+        lvs_revision = ensure_lvs_root(args.lvs_root)
+        lvs_manifest = generate_lvs_configs(
+            args.integration_yaml, args.data_root, output, lvs_output_root,
+            args.lvs_root, args.pdk_root, args.pdk, base_chip=args.base_chip,
+        )
+        lvs_manifest["lvs_repository_revision"] = lvs_revision
+        lvs_manifest_path = lvs_output_root / f"{chip.name}_lvs_manifest.json"
+        json_dump(lvs_manifest_path, lvs_manifest)
+        manifest["lvs"] = {
+            "output_root": str(lvs_output_root),
+            "manifest": str(lvs_manifest_path),
+            "environment_file": lvs_manifest["environment_file"],
+            "top_config": lvs_manifest["top_config"],
+            "lvs_repository_revision": lvs_revision,
+        }
+        json_dump(manifest_path, manifest)
         print(f"Built full-chip integration: {integrated_gds}")
         return 0
-    except (IntegrationError, OSError, json.JSONDecodeError) as exc:
+    except (IntegrationError, OSError, json.JSONDecodeError,
+            subprocess.CalledProcessError) as exc:
         try:
             args.output_root.mkdir(parents=True, exist_ok=True)
             report_name = chip.name if chip is not None else args.integration_yaml.stem

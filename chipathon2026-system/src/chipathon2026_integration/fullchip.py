@@ -16,7 +16,7 @@ from .defparse import DefDesign, load_def
 from .errors import ConfigError
 from .info import load_info, validate_pins
 from .lef import parse_lef_files
-from .lvs import load_lvs_config, resolve_downloaded_gds
+from .lvs import resolve_project_data
 from .padring_cfg import PAD_RE, audit_physical_template, parse_pad_entries, safe_identifier
 from .virtual_def import BLOCK_VARIANTS, BlockVariant
 
@@ -305,11 +305,10 @@ def _artifact_pair(project_root: Path, team: str, variant: str) -> tuple[Path, P
 
 
 def discover_project(
-    request: ProjectRequest, *, base_chip: BaseChipDefinition, info_root: Path,
-    project_root: Path, gds_root: Path,
+    request: ProjectRequest, *, base_chip: BaseChipDefinition, data_root: Path,
+    project_root: Path,
 ) -> ProjectArtifacts:
-    info_path = info_root / f"{request.team}_info.yaml"
-    lvs_path = info_root / f"{request.team}_lvs_config.json"
+    info_path, lvs_path, gds_path = resolve_project_data(data_root, request.team)
     info = load_info(info_path)
     pins = tuple(validate_pins(info, io_cells=base_chip.io_cells))
     variant = base_chip.variant(request.variant)
@@ -318,8 +317,6 @@ def discover_project(
             f"{request.team}: {len(pins)} pins exceed {request.variant} capacity {len(variant.slots)}"
         )
     _validate_endpoint(request.team, variant, pins)
-    config = load_lvs_config(lvs_path)
-    gds_path = resolve_downloaded_gds(config, team=request.team, gds_dir=gds_root)
     def_path, interface_path = _artifact_pair(project_root, request.team, request.variant)
     design = load_def(def_path)
     try:

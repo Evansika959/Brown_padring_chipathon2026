@@ -8,6 +8,10 @@
 
 Develop a Python-based integration system for the 2026 SSCS Chipathon using the GF180MCU process.
 
+The separate full-chip integration and integrated device-level LVS subsystem is
+specified normatively in `integration_spec.md`. Changes to that subsystem must
+update that specification before or together with implementation changes.
+
 The system must:
 
 1\. Read each project's info.yaml.
@@ -881,12 +885,11 @@ on the configured outline layer/datatype (default `0/0`). Rectangle width and
 height are converted to microns using the GDS layout DBU. Those dimensions and
 the participant pin count from info.yaml select every minimum-area fitting
 variant before its variant-specific padring and project DEF are generated.
-The GDS filename must be selected from the expanded `LAYOUT_FILE` in the
-project's retained lvs_config.json; selecting the first file in a directory is
-prohibited. The downloader stores that config as
-`<INFO_DIR>/<team-code>_lvs_config.json`. `PROJECT_GDS`, `PROJECT_LVS_CONFIG`,
-`PROJECT_GDS_DIR`, `PROJECT_OUTLINE_LAYER`, and `PROJECT_OUTLINE_DATATYPE` are
-Makefile-overridable.
+The GDS filename must be selected from the expanded `LAYOUT_FILE` in
+`<DATA_ROOT>/<team-code>/<project.lvs_config>`; selecting the first file in a
+directory is prohibited. Info, LVS configuration, GDS, and netlists preserve
+their repository-relative paths beneath `<DATA_ROOT>/<team-code>`.
+`PROJECT_OUTLINE_LAYER` and `PROJECT_OUTLINE_DATATYPE` are Makefile-overridable.
 
 Mapped slots must be an ordered subsequence of the variant's authoritative pin
 order. All listed slots, including E11, E12, W11, and W12, are ordinary
@@ -1038,9 +1041,9 @@ make \-f chipathon2026-system/Makefile.padframe A01
 
 The default input is:
 
-info/A01\_info.yaml
+data/A01/info.yaml
 
-INFO\_DIR and all build/tool/PDK paths must remain overrideable Make variables.
+DATA\_ROOT and all build/tool/PDK paths must remain overrideable Make variables.
 DEF\_DBU defaults to 0.005 microns and must remain overrideable. The generated
 DEF therefore uses UNITS DISTANCE MICRONS 200, and the KLayout import/output DBU
 must be set to the same value.

@@ -166,14 +166,19 @@ quadrant when all geometry and spacing checks pass.
 
 For each team, the subsystem reads:
 
-- `info/<team>_info.yaml` from an overrideable information root;
-- `info/<team>_lvs_config.json` from that root;
-- the project GDS selected by expanding `LAYOUT_FILE` in the retained
-  `lvs_config.json`; and
+- `data/<team>/info.yaml` from an overrideable common data root;
+- the original project `lvs_config.json` at the repository-relative path named
+  by `project.lvs_config` in that `info.yaml`;
+- the project GDS at the repository-relative path obtained by expanding
+  `LAYOUT_FILE` in that `lvs_config.json`; and
 - the previously generated canonical project DEF for the requested variant
   from an overrideable project-artifact root.
 
-The first GDS file in a directory must never be selected implicitly.
+The first GDS file in a directory must never be selected implicitly. Integration
+and every audit or validation program must resolve project GDS data through the
+project's downloaded `info.yaml` and `lvs_config.json` below the common data
+root. The legacy `info/<team>_*` and `gds/<team>` locations are not fallback
+inputs.
 
 The existing canonical project DEF is reused. Its variant, team mapping,
 dimensions, DBU, pins, blockages, and interface metadata must agree with the
@@ -617,9 +622,8 @@ The subsystem has its own CLI entry point or a clearly separated command group.
 It accepts:
 
 - integration YAML;
-- info root;
+- common project-data root, defaulting to `data`;
 - project-artifact root;
-- downloaded GDS root;
 - PDK/tool paths;
 - output root;
 - PR-boundary layer/datatype overrides;
@@ -649,3 +653,322 @@ not include:
 - support for a project appearing multiple times in one chip.
 
 These require explicit future specification changes.
+
+## 19. Integrated device-level LVS
+
+### 19.1 Scope and authoritative LVS implementation
+
+The integration subsystem shall generate the local source tree and hierarchical
+`lvs_config.json` files needed to run device-level LVS between the integrated
+GDS and the generated structural Verilog hierarchy.  It shall also provide a
+command that invokes the LVS run and reports its result.
+
+The authoritative LVS implementation is
+[`d-m-bailey/extra_be_checks`](https://github.com/d-m-bailey/extra_be_checks),
+checked out from the `wafer.space-run1` branch.  Its checkout directory is
+`LVS_ROOT`.
+If no checkout is available at the configured location, the command shall clone
+that repository and branch.  An existing directory must not be deleted or
+silently replaced.  An existing checkout must be validated for the expected
+repository and branch; a mismatch is an error with corrective instructions.
+
+The integrated top-level configuration shall include
+`$LVS_ROOT/tech/$PDK/lvs_config.io.json`.  That file is responsible for the
+standard-cell and GF180 I/O device-level netlists, so the generated top-level
+configuration must not add those PDK netlists separately.  A missing file is a
+fatal configuration error.
+
+### 19.2 Inputs
+
+The LVS flow consumes:
+
+- the integration YAML and its project list;
+- the existing `repo.list` team-to-`owner/repository` mapping;
+- `data/<team>/info.yaml` and the repository-relative project LVS
+  configuration referenced by it;
+- the integrated GDS;
+- the generated chip-level and padring structural Verilog;
+- each project's downloaded SPICE and/or Verilog netlists; and
+- the configured `LVS_ROOT`, common data root, PDK, work, log, signoff, and
+  output roots.
+
+Team lookup remains case-insensitive and uses the canonical team code selected
+by integration.  Every integrated project must have exactly one repository
+mapping.  Missing or ambiguous mappings are errors.
+
+### 19.3 Unified project download stage
+
+GDS and netlist acquisition must be one repository-list download operation, not
+independent GDS and LVS download workflows. The old external
+`download_chipathon_gds_v2_lfs.py` program is replaced by a downloader inside
+the `chipathon2026-system` package and is no longer part of the documented or
+invoked workflow. The downloader does not consume an integration YAML. For
+every team/repository entry in `repo.list`, the same invocation shall download:
+
+- `info.yaml`;
+- the `lvs_config.json` named by `project.lvs_config`;
+- the GDS named by the resolved `LAYOUT_FILE`;
+- every nonempty path in `LVS_SPICE_FILES`; and
+- every nonempty path in `LVS_VERILOG_FILES`.
+
+Both a JSON string and a JSON list are accepted for either source-file field.
+Empty strings are ignored.  Variables defined by the project configuration are
+resolved before repository paths are selected.  `$UPRJ_ROOT` denotes the root
+of that project's source repository during download.  Any other unresolved
+variable in a downloadable path is an error.
+
+Ordinary GitHub files and Git LFS pointers are supported for both layout and
+netlist data.  Every transfer is checked for HTTP success; LFS objects are
+additionally checked for declared size and SHA-256 identity.
+
+The downloader prints progress before every file transfer. Each message
+identifies the team, repository and immutable revision, repository-relative
+source path, and final local destination. Output is flushed so progress remains
+visible during long GDS and Git LFS transfers.
+
+Repository probing assumes the branch is `main`. The downloader first requests
+`info.yaml` from `main` without querying the GitHub repository metadata API.
+Only when `main/info.yaml` is missing may it discover a different default
+branch, using the Git remote symbolic `HEAD`; it must not use a per-repository
+GitHub API request for the normal path. The selected branch is then resolved to
+one immutable commit before downloading the project artifact set.
+
+All downloaded project artifacts preserve their full repository-relative paths
+below one common root:
+
+```text
+<data_root>/<TEAM>/info.yaml
+<data_root>/<TEAM>/<project.lvs_config repository-relative path>
+<data_root>/<TEAM>/<LAYOUT_FILE repository-relative path>
+<data_root>/<TEAM>/<LVS source repository-relative path>
+```
+
+For example, a participant layout referenced as
+`$UPRJ_ROOT/final/gds/chip_top.gds` and netlist referenced as
+`$UPRJ_ROOT/final/pnl/chip_top.pnl.v` are stored as:
+
+```text
+data/A01/final/gds/chip_top.gds
+data/A01/final/pnl/chip_top.pnl.v
+```
+
+Files are not flattened, renamed, or copied into separate GDS and netlist
+trees. Within generated configurations, `<TEAM>_ROOT` is the absolute path to
+`<data_root>/<TEAM>`, so the repository-relative suffix remains unchanged.
+
+Relative `include` directives inside SPICE or Verilog source files are not
+supported as a means of discovering additional files.  Every required source
+file must be listed by the project LVS configuration.  Preserving directories
+is required to avoid basename collisions and to provide deterministic source
+provenance.
+
+If `data_root` exists when the command starts, the downloader asks for
+confirmation to remove and recreate the complete directory. Declining aborts
+without changing it. A `--yes` option may provide confirmation for unattended
+use. The downloader rejects unsafe roots such as the filesystem root, the
+current working directory, symlinks, and non-directory paths. If `data_root`
+does not exist, it is created automatically without prompting.
+
+To avoid filesystem races from tools that recreate metadata such as macOS
+`.DS_Store`, replacement first atomically renames the existing data directory
+to a unique hidden retirement path and then recursively deletes the renamed
+tree. If deletion fails, the downloader restores the old directory when
+possible and aborts before downloading. It then creates the new `data_root`.
+
+After this initialization, each downloaded file is written immediately to its
+final repository-relative location. The downloader must not retain the complete
+multi-project artifact set in memory or defer all filesystem output until every
+repository has been downloaded. Consequently, interruption or a failed
+transfer may leave a visibly partial new data tree; a later invocation must
+confirm removal of that tree before retrying. A malformed, duplicate, or
+unknown repository-list entry is a command-level error.
+
+Any expected failure while downloading or validating an individual project is
+isolated to that project. This includes malformed YAML or JSON, missing files,
+HTTP and Git failures, invalid configuration, unsupported relative includes,
+and local file-write errors. The downloader prints a concise team-qualified
+error rather than a Python traceback, removes the partial
+`<data_root>/<TEAM>` tree so it cannot be consumed, records the failure in the
+manifest, and continues with the remaining repositories. The command exits
+nonzero after completing the other downloads.
+
+At the end of the operation, the downloader prints the number of successful
+and failed projects, followed by every failed project code and its recorded
+reason. The final summary also reports total elapsed wall-clock download time
+in `HH:MM:SS.mmm` form, including when a command-level error aborts the run.
+Timing begins only after the user accepts data-directory removal when a prompt
+is required; time spent waiting for confirmation is excluded. Without a
+prompt, timing begins immediately before data-root initialization.
+
+There shall be one canonical integration command and Makefile target for this
+unified download. No separate GDS-only downloader is used by integration or
+audit commands. The manifest records one resolved revision per project and
+applies it to all files for that project; mixing files from different revisions
+is an error.
+
+Full-chip integration and audit commands subsequently select only the teams
+named by their integration YAML from this complete downloaded snapshot.
+Projects that are not part of a particular chip remain downloaded and
+available for other integrations.
+
+### 19.4 Rewritten project configurations
+
+For each project, generate a derived configuration named
+`<TEAM>_lvs_config.json`.  Never modify the downloaded original.  The derived
+configuration defines a team-specific root variable, for example:
+
+```json
+"A01_ROOT": "<data_root>/A01"
+```
+
+Every source path rooted at `$UPRJ_ROOT` is rewritten to the corresponding
+team-root variable while preserving the repository-relative suffix.  For
+example:
+
+```text
+$UPRJ_ROOT/team_src/magic/chip_top_golden.spice
+```
+
+becomes:
+
+```text
+$A01_ROOT/team_src/magic/chip_top_golden.spice
+```
+
+The generated path must resolve to a downloaded regular file. Project fragments
+reference, but do not redefine, their `<TEAM>_ROOT` variable. String and list
+forms are normalized to lists, empty entries are removed, ordering is
+preserved, and duplicate resolved paths are rejected.
+
+Project extraction and comparison settings required by that project, including
+`EXTRACT_FLATGLOB`, `EXTRACT_ABSTRACT`, `LVS_FLATTEN`, `LVS_NOFLATTEN`, and
+`LVS_IGNORE`, are preserved.  Project `LAYOUT_FILE`, `TOP_LAYOUT`, and other
+project-run scalar values must not override the integrated top-level values.
+The generated project files act as hierarchical source/configuration fragments;
+the generated chip-level file owns the final integrated layout and top-cell
+settings.
+
+### 19.5 Integrated top-level configuration
+
+Generate one chip-level `lvs_config.json` that hierarchically includes, in
+deterministic order:
+
+1. `$LVS_ROOT/tech/$PDK/lvs_config.io.json`; and
+2. one generated project configuration for every integrated project.
+
+It shall set `TOP_LAYOUT` and `TOP_SOURCE` to the integrated chip name,
+`LAYOUT_FILE` to the integrated GDS, and add the generated padring and chip-level
+structural Verilog in leaf-to-root order.  Project netlists precede the padring
+and chip-level wrappers.  The emitted configuration must contain no unresolved
+project-root variables and every referenced local file must exist before LVS
+is started.
+
+The top-level configuration defines one absolute `<TEAM>_ROOT` value for every
+integrated project. The generated LVS environment script exports the identical
+set of project-code variables, and the direct LVS runner passes those same
+values in its subprocess environment. Thus each derived project configuration
+only needs to replace `$UPRJ_ROOT` with `$<TEAM>_ROOT` while preserving the
+repository-relative suffix.
+
+### 19.6 Renamed project-top wrappers
+
+If integration changed a project's layout top-cell name to enforce the
+team-prefix rule, LVS shall use a generated source wrapper with the same final
+name rather than editing the participant's downloaded netlist.  The wrapper
+instantiates the participant's original top module or subcircuit and preserves
+the exact terminal names and order required by the source format and project
+interface metadata.  No wrapper is generated when source and integrated layout
+top names already agree.
+
+Generated wrapper names, wrapped source names, source file, language, and port
+mapping are recorded in the LVS manifest.  Failure to find exactly one source
+definition for the expected project top is an error.
+
+### 19.7 Cross-project source-name validation
+
+Before LVS, parse all downloaded and generated source definitions and construct
+a case-sensitive name-to-project ownership table.  If the same non-standard
+module, subcircuit, or model name is defined by more than one project, report
+every owner and source location and fail before comparison.  This includes
+conflicting subordinate-cell names, not only project tops.
+
+Repeated standard-cell definitions are permitted silently.  A definition is a
+standard cell when it belongs to a standard-cell library identified by the
+project configurations or by `lvs_config.io.json`; GF180 standard-cell naming
+alone may be used only when it agrees with those configured libraries.  I/O
+cells and arbitrary participant cells are not implicitly covered by this
+exception.
+
+### 19.8 LVS environment setup
+
+The integration program, rather than the user, is responsible for constructing
+the LVS runtime environment. Configuration generation shall emit a sourceable
+POSIX shell file named `<chip_name>_lvs.env`. The LVS runner shall construct and
+pass the identical environment directly to `run_full_lvs`; sourcing the file
+manually is optional and must produce the same values.
+
+The environment file shall export at least:
+
+- `LVS_ROOT`, resolved to the validated `extra_be_checks` checkout;
+- `PDK_ROOT` and `PDK`;
+- `WORK_ROOT`, `LOG_ROOT`, and `SIGNOFF_ROOT` below the configured LVS output
+  root;
+- `INTEGRATION_ROOT`, containing the integrated GDS and generated top-level and
+  padring Verilog;
+- `LVS_BUILD_ROOT`, containing generated LVS configurations and wrappers; and
+- one absolute `<TEAM>_ROOT` for every downloaded project source tree.
+
+All emitted values must be shell-quoted safely. Environment files must not
+contain authentication tokens or inherit unrelated project-root variables.
+Required directories are created before execution. Existing caller values for
+these variables must not silently override the generated values; explicit CLI
+or Makefile path options are resolved first and then written into the generated
+environment.
+
+Before invoking LVS, validate the environment by processing the generated
+top-level configuration through `$LVS_ROOT/set_lvs_env.py`. Any undefined
+variable, missing included configuration, missing source/layout file, or
+disagreement between the environment file and direct runner environment is a
+fatal preflight error.
+
+The environment path, effective values, selected PDK, and hashes of the
+generated environment and configuration files are recorded in the LVS
+manifest. Because the environment contains machine-local absolute paths, it is
+a generated build artifact and not an input committed as portable project
+configuration.
+
+### 19.9 Execution, outputs, and safety
+
+Successful full-chip integration always generates the LVS configurations,
+wrappers, manifest, and environment as integration outputs. There is no
+separate command or Makefile target for LVS-environment or configuration
+generation. The user-facing flow provides a project-data download command, the
+full-chip integration command, and an LVS-run command. The run stage consumes
+the artifacts already emitted by integration and the exact project files under
+`data_root` that integration validated. It must not download, replace, or
+otherwise mutate project input data. Project acquisition remains exclusively a
+separate pre-integration operation. The run stage invokes:
+
+```text
+$LVS_ROOT/run_full_lvs <generated-chip-lvs-config>
+```
+
+with the complete generated environment described above. The command returns
+nonzero for any prerequisite, download, environment preflight, configuration,
+extraction, collision, or LVS comparison failure.
+
+Outputs include:
+
+- the generated chip and per-project LVS configurations;
+- the generated sourceable LVS environment file;
+- any generated project-top wrappers;
+- a download/configuration manifest containing repositories, branch/revision,
+  remote paths, local paths, sizes, and hashes;
+- the exact effective command and environment roots;
+- extraction and Netgen logs;
+- the device-level LVS report; and
+- a concise machine-readable and human-readable pass/fail summary.
+
+No downloaded participant source is modified in place.  A failed run retains
+diagnostic outputs but must mark them invalid and must not report the integrated
+design as LVS-clean.

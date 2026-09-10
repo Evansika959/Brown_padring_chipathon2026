@@ -21,6 +21,7 @@ from chipathon2026_integration.fullchip import (
 )
 from chipathon2026_integration.constants import IO_CELLS
 from chipathon2026_integration.fullchip_cli import main as fullchip_main
+from chipathon2026_integration.fullchip_lvs_cli import parser as lvs_parser
 from chipathon2026_integration.virtual_def import BLOCK_VARIANTS
 
 
@@ -82,6 +83,14 @@ def test_fullchip_rejects_noncanonical_destination_dbu(tmp_path: Path):
     ]) == 1
     report = (tmp_path / "output/integration_validation.json").read_text(encoding="utf-8")
     assert "requires --def-dbu 0.005" in report
+
+
+def test_lvs_cli_has_no_separate_configuration_generation_action():
+    with pytest.raises(SystemExit):
+        lvs_parser().parse_args(["generate", "integration.yaml"])
+    with pytest.raises(SystemExit):
+        lvs_parser().parse_args(["download"])
+    assert lvs_parser().parse_args(["run", "integration.yaml"]).action == "run"
 
 
 def test_base_chip_rejects_duplicate_io_type(tmp_path: Path):

@@ -158,6 +158,39 @@ chipathon-integrate generate-project-def \
   --output-dir build/project_defs
 ```
 
+## Integrated device-level LVS
+
+Full-chip integration automatically generates the hierarchical LVS
+configurations, wrappers, manifest, and sourceable environment below
+`$(OUTPUT_ROOT)/lvs`. No separate LVS-environment generation target is needed.
+After downloading participant data and building the integrated chip, run
+device-level LVS with:
+
+```bash
+make -f chipathon2026-system/Makefile.lvs lvs \
+  CHIP_CONFIG=integration.yaml \
+  PDK_ROOT=/path/to/pdks \
+  PDK=gf180mcuD
+```
+
+Project data must be downloaded before integration with the separate acquisition
+command. The LVS Makefile never downloads or replaces project inputs:
+
+```bash
+chipathon-download-data repo.list --data-root data
+make -f chipathon2026-system/Makefile.fullchip CHIP_CONFIG=integration.yaml
+make -f chipathon2026-system/Makefile.lvs run-lvs CHIP_CONFIG=integration.yaml
+```
+
+`DATA_ROOT`, `INTEGRATED_ROOT`, `LVS_OUTPUT_ROOT`, and `LVS_ROOT`
+are overrideable. `DATA_ROOT` defaults to `data`; each participant's info,
+original LVS configuration, GDS, and netlists retain their repository-relative
+paths below `data/<TEAM>`. If `LVS_ROOT` is absent,
+the tool clones `d-m-bailey/extra_be_checks` from the `wafer.space-run1`
+branch. Integration writes generated configuration, wrappers, manifests, and
+the environment below `LVS_OUTPUT_ROOT`; the LVS runner consumes those existing
+artifacts and writes logs and reports there.
+
 Use `--variant CODE` to request one particular fitting variant. By default,
 GF180 Metal1 through Metal5 are blocked wherever a variant defines a blockage;
 repeat `--routing-layer` to override that layer list. Coordinates are accepted
@@ -191,26 +224,24 @@ rectangle on GDS layer `0/0` and combines them with the info.yaml pin count:
 make -f chipathon2026-system/Makefile.padframe project-def-A01
 ```
 
-By default it reads `info/A01_lvs_config.json`, expands its `LAYOUT_FILE`, and
-uses the matching downloaded basename under `gds/A01/`; directory ordering is
-never used. The downloader writes this retained LVS-config copy. Existing
-download directories must be refreshed, or supplied with
-`PROJECT_LVS_CONFIG=/path/to/lvs_config.json`. `PROJECT_GDS=/path/to/project.gds`
-remains an explicit override. The outline layer is overrideable with
+By default it reads `data/A01/info.yaml`, opens its repository-relative
+`project.lvs_config`, expands `LAYOUT_FILE`, and uses that exact path below
+`data/A01`; directory ordering and legacy GDS directories are never used. The
+outline layer is overrideable with
 `PROJECT_OUTLINE_LAYER` and `PROJECT_OUTLINE_DATATYPE`. One variant-specific
 padring and project DEF are written for every minimum-area fitting block type.
 
 ## Download flow
 
 ```bash
-python3 -u scripts/download_chipathon_gds_v2.py \
-  --info-dir info \
-  --gds-dir gds \
-  --overwrite \
-  repo.list 2>&1 | tee download.report
+chipathon-download-data repo.list --data-root data
 ```
 
-The script also calls `sys.stdout.reconfigure(line_buffering=True)` as specified.
+This command recreates `data` and downloads every project in `repo.list`: its
+info, original LVS configuration, GDS, and listed netlists from one immutable
+repository revision. Files are written to their final repository-relative paths
+as they arrive, so progress is visible on disk and an interrupted run may leave
+a partial directory that must be replaced on the next run.
 
 ## Install and test
 

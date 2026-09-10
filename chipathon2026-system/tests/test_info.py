@@ -12,8 +12,10 @@ def test_project_lvs_config_only(minimal_info):
 
 def test_validate_pin_types_and_analog(minimal_info):
     pins = validate_pins(minimal_info)
-    assert [p["io_type"] for p in pins] == ["input_schmitt", "bidirectional", "analog"]
-    assert pins[-1]["secondary_esd"] is True
+    assert [p["io_type"] for p in pins] == [
+        "input_schmitt", "bidirectional", "analog", "power", "ground"
+    ]
+    assert pins[2]["secondary_esd"] is True
 
 
 def test_duplicate_pin_rejected(minimal_info):

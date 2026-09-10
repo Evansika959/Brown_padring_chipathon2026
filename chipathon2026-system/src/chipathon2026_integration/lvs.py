@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError
+from .info import get_lvs_config_reference, load_info
 
 VARIABLE_RE = re.compile(r"\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))")
 
@@ -113,12 +114,20 @@ def normalize_repo_path(value: str) -> str:
     return value
 
 
-def resolve_downloaded_gds(config: dict[str, Any], *, team: str, gds_dir: Path) -> Path:
-    """Resolve LAYOUT_FILE to the downloader's local <gds-dir>/<team>/<basename>."""
-    layout_path = normalize_repo_path(get_layout_file(config))
-    candidate = gds_dir / team / Path(layout_path).name
-    if not candidate.is_file():
+def resolve_project_data(data_root: Path, team: str) -> tuple[Path, Path, Path]:
+    """Resolve info, LVS config, and GDS in a repository-shaped data tree."""
+    team_root = data_root / team
+    info_path = team_root / "info.yaml"
+    info = load_info(info_path)
+    reference = normalize_repo_path(get_lvs_config_reference(info))
+    lvs_path = team_root / reference
+    if not lvs_path.is_file():
+        raise ConfigError(f"{team}: project LVS configuration not found: {lvs_path}")
+    config = load_lvs_config(lvs_path)
+    layout_reference = normalize_repo_path(get_layout_file(config))
+    gds_path = team_root / layout_reference
+    if not gds_path.is_file():
         raise ConfigError(
-            f"GDS selected by LAYOUT_FILE ({layout_path}) was not found at {candidate}"
+            f"{team}: GDS selected by LAYOUT_FILE ({layout_reference}) was not found at {gds_path}"
         )
-    return candidate
+    return info_path, lvs_path, gds_path

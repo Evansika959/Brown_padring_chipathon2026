@@ -6,10 +6,11 @@ PADRING_BUILD_DIR ?= $(REPOSITORY_ROOT)/build
 PADRING ?= $(PADRING_BUILD_DIR)/padring
 CHIP_CONFIG ?= integration.yaml
 BASE_CHIP ?=
-INFO_ROOT ?= info
+DATA_ROOT ?= data
 PROJECT_ROOT ?= build/padframes
-GDS_ROOT ?= gds
 OUTPUT_ROOT ?= build/integrated
+LVS_OUTPUT_ROOT ?= $(OUTPUT_ROOT)/lvs
+LVS_ROOT ?= build/tools/extra_be_checks
 TEMPLATE ?= $(MAKEFILE_DIR)padring_template.cfg
 PDK_ROOT ?= /foss/pdks
 PDK ?= gf180mcuD
@@ -32,13 +33,16 @@ VALIDATION_ONLY ?=
 all:
 	$(FULLCHIP) $(CHIP_CONFIG) \
 		$(if $(BASE_CHIP),--base-chip $(BASE_CHIP)) \
-		--info-root $(INFO_ROOT) \
+		--data-root $(DATA_ROOT) \
 		--project-root $(PROJECT_ROOT) \
-		--gds-root $(GDS_ROOT) \
 		--template $(TEMPLATE) \
 		--padring $(PADRING) \
 		--tech-pdk $(TECH_PDK) \
 		--output-root $(OUTPUT_ROOT) \
+		--lvs-output-root $(LVS_OUTPUT_ROOT) \
+		--lvs-root $(LVS_ROOT) \
+		--pdk-root $(PDK_ROOT) \
+		--pdk $(PDK) \
 		--klayout $(KLAYOUT) \
 		--def-dbu $(DEF_DBU) \
 		--outline-layer $(OUTLINE_LAYER) \

@@ -64,6 +64,8 @@ def test_project_names_do_not_replace_canonical_instances(full_template, minimal
     minimal_info["pins"] = [
         {"name": "data[7]", "io_type": "bidirectional"},
         {"name": "data_7", "io_type": "bidirectional"},
+        {"name": "vdd", "io_type": "power"},
+        {"name": "vss", "io_type": "ground"},
     ]
     _cfg, mapping = generate_padring_config(
         info=minimal_info, info_path=tmp_path/"i.yaml", template_path=full_template

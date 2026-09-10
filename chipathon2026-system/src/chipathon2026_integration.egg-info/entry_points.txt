@@ -1,3 +1,5 @@
 [console_scripts]
-chipathon-download-gds = chipathon2026_integration.downloader:main
+chipathon-download-data = chipathon2026_integration.fullchip_lvs_cli:download_main
+chipathon-fullchip = chipathon2026_integration.fullchip_cli:main
+chipathon-fullchip-lvs = chipathon2026_integration.fullchip_lvs_cli:main
 chipathon-integrate = chipathon2026_integration.cli:main

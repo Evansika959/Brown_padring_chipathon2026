@@ -1,0 +1,30 @@
+# Run integrated LVS using configs and project data already used by integration.
+
+MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+CHIP_CONFIG ?= integration.yaml
+BASE_CHIP ?=
+DATA_ROOT ?= data
+INTEGRATED_ROOT ?= build/integrated
+LVS_OUTPUT_ROOT ?= $(INTEGRATED_ROOT)/lvs
+LVS_ROOT ?= build/tools/extra_be_checks
+PDK_ROOT ?= /foss/pdks
+PDK ?= gf180mcuD
+PYTHON ?= python3
+LVS_TOOL ?= env PYTHONPATH=$(MAKEFILE_DIR)src $(PYTHON) -m chipathon2026_integration.fullchip_lvs_cli
+
+LVS_ARGS = $(CHIP_CONFIG) \
+	$(if $(BASE_CHIP),--base-chip $(BASE_CHIP)) \
+	--data-root $(DATA_ROOT) \
+	--integrated-root $(INTEGRATED_ROOT) \
+	--output-root $(LVS_OUTPUT_ROOT) \
+	--lvs-root $(LVS_ROOT) \
+	--pdk-root $(PDK_ROOT) \
+	--pdk $(PDK)
+
+.DEFAULT_GOAL := lvs
+.PHONY: lvs run-lvs
+
+lvs: run-lvs
+
+run-lvs:
+	$(LVS_TOOL) run $(LVS_ARGS)
