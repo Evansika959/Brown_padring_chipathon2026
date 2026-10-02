@@ -15,6 +15,7 @@ src/chipathon2026_integration/lvs.py
 src/chipathon2026_integration/padring_cfg.py
 src/chipathon2026_integration/padring_outputs.py
 src/chipathon2026_integration/padring_runner.py
+src/chipathon2026_integration/project_defs_cli.py
 src/chipathon2026_integration/virtual_def.py
 src/chipathon2026_integration.egg-info/PKG-INFO
 src/chipathon2026_integration.egg-info/SOURCES.txt

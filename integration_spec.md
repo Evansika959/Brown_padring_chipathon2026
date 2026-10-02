@@ -640,6 +640,14 @@ recorded in the manifest.
 The normal build performs validation before expensive padring or GDS work and
 validates the final exported artifacts again afterward.
 
+A separate batch project-DEF command accepts an integration YAML and generates
+canonical project DEF artifacts for every distinct team named by that file.
+It uses the common downloaded data root and each project's configured GDS,
+delegates to the same measurement and minimal-variant selection flow as the
+single-project Makefile target, and applies one consistent set of PDK, padring,
+KLayout, template, DBU, and output-root options to the complete batch. A failed
+project makes the batch command return nonzero and identifies the failing build.
+
 ## 18. Initial implementation boundaries
 
 The first implementation includes the outputs and checks defined above. It does

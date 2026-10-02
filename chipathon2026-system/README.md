@@ -178,9 +178,17 @@ command. The LVS Makefile never downloads or replaces project inputs:
 
 ```bash
 chipathon-download-data repo.list --data-root data
+chipathon-build-project-defs integration.yaml --data-root data
 make -f chipathon2026-system/Makefile.fullchip CHIP_CONFIG=integration.yaml
 make -f chipathon2026-system/Makefile.lvs run-lvs CHIP_CONFIG=integration.yaml
 ```
+
+`chipathon-build-project-defs` reads the integration YAML and generates the
+canonical project DEFs for every listed team. It uses each downloaded project's
+configured GDS, measures its top-cell outline, and runs the existing minimal
+variant-selection and project-DEF flow. Common paths and tools can be overridden
+with `--output-dir`, `--base-chip`, `--template`, `--padring`, `--pdk-root`,
+`--pdk`, `--tech-pdk`, and `--klayout`.
 
 `DATA_ROOT`, `INTEGRATED_ROOT`, `LVS_OUTPUT_ROOT`, and `LVS_ROOT`
 are overrideable. `DATA_ROOT` defaults to `data`; each participant's info,

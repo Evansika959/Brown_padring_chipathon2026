@@ -21,6 +21,7 @@ chipathon-integrate = "chipathon2026_integration.cli:main"
 chipathon-fullchip = "chipathon2026_integration.fullchip_cli:main"
 chipathon-fullchip-lvs = "chipathon2026_integration.fullchip_lvs_cli:main"
 chipathon-download-data = "chipathon2026_integration.fullchip_lvs_cli:download_main"
+chipathon-build-project-defs = "chipathon2026_integration.project_defs_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

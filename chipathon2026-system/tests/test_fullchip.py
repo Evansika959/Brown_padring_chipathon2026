@@ -22,6 +22,7 @@ from chipathon2026_integration.fullchip import (
 from chipathon2026_integration.constants import IO_CELLS
 from chipathon2026_integration.fullchip_cli import main as fullchip_main
 from chipathon2026_integration.fullchip_lvs_cli import parser as lvs_parser
+from chipathon2026_integration.project_defs_cli import build_command, parser as project_defs_parser
 from chipathon2026_integration.virtual_def import BLOCK_VARIANTS
 
 
@@ -91,6 +92,21 @@ def test_lvs_cli_has_no_separate_configuration_generation_action():
     with pytest.raises(SystemExit):
         lvs_parser().parse_args(["download"])
     assert lvs_parser().parse_args(["run", "integration.yaml"]).action == "run"
+
+
+def test_batch_project_defs_builds_all_team_targets(tmp_path: Path):
+    args = project_defs_parser().parse_args([
+        str(tmp_path / "integration.yaml"),
+        "--data-root", str(tmp_path / "data"),
+        "--output-dir", str(tmp_path / "padframes"),
+        "--pdk-root", str(tmp_path / "pdks"),
+    ])
+    command = build_command(args, ["A01", "B02"])
+    assert "project-def-A01" in command
+    assert "project-def-B02" in command
+    assert f"DATA_ROOT={tmp_path / 'data'}" in command
+    assert f"OUTPUT_DIR={tmp_path / 'padframes'}" in command
+    assert f"TECH_PDK={tmp_path / 'pdks/gf180mcuD'}" in command
 
 
 def test_base_chip_rejects_duplicate_io_type(tmp_path: Path):
