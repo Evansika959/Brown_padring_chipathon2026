@@ -54,8 +54,9 @@ DBUs without flattening the hierarchy.
 - Replace only selected block-variant user slots and make unused selected slots
   `gf180mcu_fd_io__asig_5p0` placeholders.
 - Detect malformed YAML, unsupported types, duplicate user pins, missing or
-  illegal `secondary_esd`, too many pins, sanitization collisions, missing
-  slots, fixed-instance collisions, and missing cell mappings.
+  malformed or misplaced optional `secondary_esd`, too many pins, sanitization
+  collisions, missing slots, fixed-instance collisions, and missing cell
+  mappings.
 - Generate machine-readable pin-to-slot metadata.
 - Build/run YosysHQ padring with every LEF required by the current cell map.
 - Parse GF180 LEF pin geometry and validate the project-facing terminal set.

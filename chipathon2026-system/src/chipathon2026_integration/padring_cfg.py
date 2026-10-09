@@ -213,7 +213,7 @@ def generate_padring_config(
                 "io_type": pin["io_type"],
                 "cell": cell,
             }
-            if pin["io_type"] == "analog":
+            if pin["io_type"] == "analog" and "secondary_esd" in pin:
                 entry["secondary_esd"] = pin["secondary_esd"]
         else:
             cell = ANALOG_PLACEHOLDER_CELL

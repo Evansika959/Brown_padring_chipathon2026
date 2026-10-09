@@ -209,21 +209,19 @@ The generated project DEF must expose the necessary project-side connections for
 
 The exact terminal list must come from the authoritative GF180 cell definitions.
 
-# **8\. Analog secondary\_esd**
+# **8\. Analog pins**
 
-For io\_type: analog, the YAML must explicitly contain secondary\_esd: true or secondary\_esd: false.
+An analog pin requires only its name and `io_type: analog`:
 
 \- name: ain  
-  io\_type: analog  
-  secondary\_esd: true
+  io\_type: analog
 
-secondary\_esd is prohibited for non-analog pad types.
-
-The value does not change the perimeter I/O cell:
-
-gf180mcu\_fd\_io\_\_asig\_5p0
-
-It is metadata used later to determine whether additional internal ESD protection is required.
+The `secondary_esd` field is no longer required and does not affect the
+perimeter I/O cell, which remains `gf180mcu_fd_io__asig_5p0`. For compatibility
+with existing project metadata, an optional boolean `secondary_esd` field may
+be present on an analog pin; it is retained as inert metadata and must not
+change validation, pad mapping, or analog pin categorization. The field is not
+valid on non-analog pin types.
 
 # **9\. Power architecture**
 
@@ -880,16 +878,54 @@ Metal1 through Metal5 and can be overridden by repeating `--routing-layer`.
 
 The normal Makefile flow derives project width and height from the project's
 GDS rather than requiring manual dimensions. The GDS must have exactly one top
-cell and exactly one rectangle, with no other shapes, directly in that top cell
-on the configured outline layer/datatype (default `0/0`). Rectangle width and
-height are converted to microns using the GDS layout DBU. Those dimensions and
-the participant pin count from info.yaml select every minimum-area fitting
-variant before its variant-specific padring and project DEF are generated.
+cell. The `pr_boundary` layer is not used to derive project dimensions because
+it can describe the selected block size rather than the minimum physical size
+of the project content.
+
+Classify project type using only cells that contain direct physical geometry on
+the PDK-mapped poly, diffusion, or MIM-cap layers. Ignore cells with no geometry
+on those device layers, including via-only cells and metal-only routing cells.
+A project is digital when all relevant device-layer cells are macros from the
+configured standard-cell LEFs, analog when none are standard cells, and mixed
+signal when both standard-cell and non-standard device geometry are present.
+Standard-cell membership and tap/fill classification come from those LEFs, not
+from guessed cell-name prefixes. Calculate physical size independently of the
+project-type result. Always include the transformed GDS geometry of every
+recognized standard-cell instance, across all GDS layers, except for the
+excluded standard-cell classes and families below. Exclude fillers,
+spacers, well taps, endcaps, antenna cells, tie-high/tie-low cells, buffers,
+clock buffers, tri-state buffers, and delay-buffer cells from this boundary.
+Also always include transformed non-standard GDS geometry on the PDK-mapped
+poly, diffusion, and mim_cap layers. The computed boundary is the union of
+these two geometry sets regardless of whether classification reports digital,
+analog, mixed signal, or unknown. Geometry in any cell whose name contains `secondary_esd`
+(case-insensitive), including its hierarchy, is excluded from this analog
+measurement. The semantic layers must be resolved through the configured PDK
+KLayout layer-properties file; do not substitute `pr_boundary` or hard-code
+another layer as a fallback.
+
+Use the measured physical bounding-box width and height, converted to microns
+using the GDS layout DBU, together with the participant pin count from
+info.yaml to select every minimum-area fitting variant before its
+variant-specific padring and project DEF are generated. Fail if the required
+standard-cell library or layer mapping is unavailable, or if the selected
+geometry has no positive-area bounding box. An unknown type does not invalidate
+an otherwise valid physical-size measurement. The PR-boundary layer
+remains available for independent placement/containment validation; it does
+not determine the minimum-fitting variant.
+
+Independently of this sizing measurement, require exactly one rectangular
+PR-boundary shape and no other shapes directly in the project top cell on the
+configured PR-boundary layer/datatype (default `0/0`). Record its geometry for
+full-chip placement validation; do not use it to determine the project DEF
+dimensions.
+
 The GDS filename must be selected from the expanded `LAYOUT_FILE` in
 `<DATA_ROOT>/<team-code>/<project.lvs_config>`; selecting the first file in a
 directory is prohibited. Info, LVS configuration, GDS, and netlists preserve
-their repository-relative paths beneath `<DATA_ROOT>/<team-code>`.
-`PROJECT_OUTLINE_LAYER` and `PROJECT_OUTLINE_DATATYPE` are Makefile-overridable.
+their repository-relative paths beneath `<DATA_ROOT>/<team-code>`. The PDK
+layer-properties file and standard-cell LEFs used for the measurement must
+come from the configured `TECH_PDK`.
 
 Mapped slots must be an ordered subsequence of the variant's authoritative pin
 order. All listed slots, including E11, E12, W11, and W12, are ordinary
@@ -977,7 +1013,7 @@ The converter should reject:
 * malformed YAML;  
 * unsupported io\_type;  
 * duplicate user pin names;  
-* analog pins missing secondary\_esd;  
+* malformed optional secondary\_esd values on analog pins;
 * secondary\_esd on non-analog pins;  
 * more project pins than available block slots;  
 * duplicate generated padring instance names;  
@@ -1168,3 +1204,149 @@ Missing LEF SIZE data or ambiguous square marker geometry is a deterministic
 error.
 
 ***Key rule:** Physical slot order must always be represented explicitly. Do not derive it from words such as clockwise, counter-clockwise, left-to-right, or package orientation when an ordered list can be provided instead.*
+
+# **32\. GDS project audit**
+
+The repository provides `chipathon2026-system/scripts/gds_project_audit.py` to
+audit successfully downloaded project layouts. This section is the sole
+authoritative specification for that audit; no separate audit specification is
+maintained.
+
+## **32.1 Inputs and project selection**
+
+The audit reads the GDS download report and emits one CSV row for each project
+record containing a successful `GDS saved:` entry. Summary and failed-download
+records are skipped. From each successful record it obtains the team code,
+local `info.yaml`, exact `TOP_LAYOUT`, and local GDS path. Relative paths are
+resolved from the report working directory. The named `TOP_LAYOUT` must exist;
+the first KLayout top cell is never an implicit substitute.
+
+The saved GDS must be a usable binary, not a Git LFS pointer. The downloader
+recognizes LFS pointers, retrieves the object through the Git LFS batch API,
+applies returned download headers, and verifies both declared byte count and
+SHA-256 before emitting `GDS saved:`. A valid existing binary may be reused,
+but an existing pointer must be replaced. Missing files, unresolved pointers,
+failed transfers, or identity mismatches are project download failures.
+
+Each `info.yaml` pin requires a unique name and one canonical I/O type:
+`power`, `ground`, `analog`, `input_cmos`, `input_schmitt`, `bidirectional`, or
+`bidirectional_24ma`. Analog `secondary_esd` metadata is optional and does not
+change audit categorization or counts.
+
+## **32.2 Geometry measurements**
+
+`width` and `height` are the dimensions in microns of exactly one rectangular
+shape placed directly in `TOP_LAYOUT` on the configurable PR-boundary layer,
+default `0/0`. Missing, multiple, nonrectangular, or hierarchical-only boundary
+geometry is an error.
+
+`computed_width` and `computed_height` are the transformed physical-content
+bounding-box dimensions used for project-block selection. Standard-cell
+membership is defined exclusively by exact, case-sensitive GDS cell-name
+membership in the `MACRO` declarations of the configured standard-cell LEFs;
+cell-name prefixes are never guessed. By default the configured LEFs are every
+`*.lef` under
+`<TECH_PDK>/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lef`, replaceable by repeated
+`--std-cell-lef` options.
+
+A cell influences project type only when it contains direct non-text geometry
+on a mapped poly, diffusion, or MIM-cap layer. Via cells and other cells with
+only metal/cut geometry are ignored. Relevant cells are divided by exact LEF
+macro membership: only standard cells means `Digital`, only non-standard cells
+means `Analog`, and both means `Mixed signal`.
+
+A standard-cell macro is excluded from the computed boundary when its LEF `CLASS` contains a whole word
+`WELLTAP`, `TAP`, `SPACER`, `FILL`, `ENDCAP`, `ANTENNACELL`, `TIEHIGH`, or
+`TIELOW`, case-insensitively. Because GF180 buffer and delay cells use only
+`CLASS CORE`, also exclude exact GF180 macro families whose final name segment
+matches `buf_<drive>`, `bufz_<drive>`, `clkbuf_<drive>`, or
+`dly<variant>_<drive>`. These name-family exclusions apply only after the cell
+has been established as a standard-cell macro by the configured LEF. A project
+Computed geometry does not depend on this type classification. It is always
+the union of: (1) transformed geometry on all GDS layers from matched macro
+cells remaining after these exclusions, including recognized standard cells
+that contain no semantic device-layer geometry; and (2) transformed geometry
+on the semantic poly, diffusion, and MIM-cap layers from non-standard cells.
+Cells whose names contain
+`secondary_esd`, case-insensitively, and their complete hierarchy are excluded.
+There is no hard-coded semantic-layer fallback. Unreadable LEFs or layer
+properties, missing semantic mappings, or no positive-area result leave the
+computed dimensions empty and add a deterministic audit error without
+discarding valid PR-boundary dimensions.
+
+For GF180, the layer-properties semantic mapping recognizes `Poly2` as poly,
+`COMP` as diffusion, and `FuseTop` as MIM-cap geometry. In the GF180 `.lyp`
+these labels may appear as the prefix of `<source>` values such as
+`Poly2 30/0@1`, `COMP 22/0@1`, and `FuseTop 75/0@1` while `<name>` is empty;
+the parser must accept both that representation and the conventional form with
+the semantic label in `<name>` and only `layer/datatype@view` in `<source>`.
+
+## **32.3 Ordered power/ground grouping**
+
+The ordered `info.yaml` pin list is partitioned into groups. The first pin
+starts the first group. A second `power` encountered in a group starts a new
+group at that power pin; independently, a second `ground` starts a new group at
+that ground pin. Signal pins remain in the current group. Every completed and
+final group must contain exactly one power and exactly one ground. Incomplete
+groups add an audit error but do not prevent the remaining text and geometry
+checks.
+
+## **32.4 Top-level text and interface matching**
+
+Only text placed directly in `TOP_LAYOUT` participates. Unique spelling and
+occurrence count are retained. Matching is case-insensitive while the actual
+layout spelling remains diagnostic. Text containing `.` is ignored before
+unmatched processing.
+
+Power, ground, and analog each require exactly one direct text name equal to
+the configured pin name. Input CMOS and Schmitt pads require the configured
+base name as their data port. Bidirectional pads recognize names derived by
+inserting `_IN` and `_OUT` before any trailing bus index; at least one of those
+two data names is required and both are accounted for when present.
+
+Optional digital control names are recognized but never required. A control
+suffix is inserted before a trailing `[<decimal-index>]`. Recognized controls
+include the terminals applicable to the selected GF180 I/O macro, including
+`IE`, `OE`, `PU`, `PD`, `PDRV0`, `PDRV1`, `SL`, and `CS`. Scalar and indexed
+forms are accepted case-insensitively. An index after the suffix, a nondecimal
+index, an inapplicable terminal, or a name belonging to another configured pad
+is not recognized.
+
+A configured one-to-one pin missing its required text, or a digital pad failing
+its required data-port check, is prefixed with `*` in its compact category
+field and produces a detailed error. Optional missing controls do not produce
+errors. `unmatched` contains each remaining unique direct top-level text once
+after recognized data and optional controls have been removed.
+
+## **32.5 CSV and failures**
+
+The exact CSV columns are:
+
+```text
+Team,Top_cell,gds_file,width,height,computed_width,computed_height,type,ws_def_ready,gf_def_ready,drc_ready,lvs_ready,power,ground,analog,input_cmos,input_schmitt,bidirectional,bidirectional_24ma,unmatched,errors
+```
+
+`type` is exactly `Analog`, `Digital`, or `Mixed signal` according to the
+device-layer classification above. If no device-layer geometry determines a
+type, use `?`; this does not clear valid computed dimensions obtained by the
+type-independent measurement rule. Record other classification failures in
+`errors`.
+
+The four readiness fields are read from `project.ws_def_ready`,
+`project.gf_def_ready`, `project.drc_ready`, and `project.lvs_ready` in
+`info.yaml`. Emit `Y` only for a YAML Boolean `true`, `N` only for a YAML
+Boolean `false`, and `?` when `project` is missing or not a mapping, when the
+key is missing, or when its value has any other YAML type or spelling.
+
+`gds_file` displays the filename while the full path remains internal. Every
+pad-type and unmatched field has `<count>:<space-separated-names>` form and is
+`0:` when empty. Repeated layout text counts once for matching/unmatched but
+retains its occurrence count for diagnostics. The audit prints overall totals
+for every pad type.
+
+Per-project problems are accumulated in `errors` and do not prevent other
+successfully downloaded projects from being audited. These include missing
+inputs, malformed or duplicate pins, unknown types, invalid grouping, missing
+top cell or PR boundary, interface mismatches, and computed-size failures.
+`--strict` returns nonzero if any successfully downloaded project has an audit
+error.

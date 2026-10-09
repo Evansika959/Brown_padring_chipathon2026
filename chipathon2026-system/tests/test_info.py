@@ -15,7 +15,7 @@ def test_validate_pin_types_and_analog(minimal_info):
     assert [p["io_type"] for p in pins] == [
         "input_schmitt", "bidirectional", "analog", "power", "ground"
     ]
-    assert pins[2]["secondary_esd"] is True
+    assert "secondary_esd" not in pins[2]
 
 
 def test_duplicate_pin_rejected(minimal_info):
@@ -24,9 +24,23 @@ def test_duplicate_pin_rejected(minimal_info):
         validate_pins(minimal_info)
 
 
-def test_analog_requires_secondary_esd():
-    with pytest.raises(ConfigError, match="secondary_esd"):
-        validate_pins({"pins": [{"name": "a", "io_type": "analog"}]})
+def test_analog_does_not_require_secondary_esd():
+    assert validate_pins({"pins": [{"name": "a", "io_type": "analog"}]}) == [
+        {"name": "a", "io_type": "analog"}
+    ]
+
+
+def test_analog_accepts_legacy_secondary_esd_metadata():
+    assert validate_pins({
+        "pins": [{"name": "a", "io_type": "analog", "secondary_esd": True}]
+    })[0]["secondary_esd"] is True
+
+
+def test_analog_secondary_esd_must_be_boolean_when_present():
+    with pytest.raises(ConfigError, match="must be boolean"):
+        validate_pins({
+            "pins": [{"name": "a", "io_type": "analog", "secondary_esd": "yes"}]
+        })
 
 
 def test_nonanalog_forbids_secondary_esd():

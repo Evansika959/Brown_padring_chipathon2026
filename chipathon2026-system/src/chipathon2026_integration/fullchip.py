@@ -548,7 +548,11 @@ def generate_chip_padring(
                 "template_flip": entry.flip, "requested_flip": requested_flip,
                 "effective_flip": effective_flip,
                 "effective_orientation": "FLIP" if effective_flip else "NORMAL",
-                **({"secondary_esd": pin["secondary_esd"]} if io_type == "analog" else {}),
+                **(
+                    {"secondary_esd": pin["secondary_esd"]}
+                    if io_type == "analog" and "secondary_esd" in pin
+                    else {}
+                ),
             }
         if not region_power or not region_ground:
             raise ConfigError(f"{team}: final power/ground group is incomplete")

@@ -63,11 +63,7 @@ def validate_pins(
             )
 
         if io_type == "analog":
-            if "secondary_esd" not in raw:
-                raise ConfigError(
-                    f"{where} ({name}): analog pins require secondary_esd: true or false"
-                )
-            if not isinstance(raw["secondary_esd"], bool):
+            if "secondary_esd" in raw and not isinstance(raw["secondary_esd"], bool):
                 raise ConfigError(f"{where} ({name}): secondary_esd must be boolean")
         elif "secondary_esd" in raw:
             raise ConfigError(

@@ -35,7 +35,7 @@ def minimal_info():
         "pins": [
             {"name": "reset_n", "io_type": "input_schmitt"},
             {"name": "data[7]", "io_type": "bidirectional"},
-            {"name": "ain", "io_type": "analog", "secondary_esd": True},
+            {"name": "ain", "io_type": "analog"},
             {"name": "vdd", "io_type": "power"},
             {"name": "vss", "io_type": "ground"},
         ],

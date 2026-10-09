@@ -203,11 +203,15 @@ variant:
 8. Require positive PR-boundary width and height.
 9. Require the PR-boundary width and height to fit the selected variant's
    usable width and height.
-10. Require the canonical project DEF DIEAREA, origin assumptions, variant,
-    and measured GDS PR boundary to agree.
+10. Require the canonical project DEF DIEAREA and origin assumptions to match
+    the selected variant. The variant was selected using the physical-content
+    bounding box defined by the canonical project-DEF specification; do not
+    require that bbox to equal the PR boundary.
 
 Both PR-boundary size and origin are mandatory checks. A size-only bounding-box
-test is insufficient.
+test is insufficient. The PR boundary remains the project footprint for
+full-chip containment, overlap, and spacing checks, but does not determine
+which minimum-area project-DEF variant is selected.
 
 ## 6. Quadrant transformations
 

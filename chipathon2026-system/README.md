@@ -19,7 +19,9 @@ make -f chipathon2026-system/Makefile.fullchip \
 
 Use the `validate` target to inspect project GDS PR boundaries, variant
 eligibility, transformed placement, spacing, and pad-slot ownership without
-running padring or producing the integrated GDS.
+running padring or producing the integrated GDS. The PR boundary is used for
+placement validation; project-DEF sizing uses the physical-content bounding
+box described in the specification.
 
 Full-chip GDS assembly uses the integrated DEF as the placement authority and
 requires `UNITS DISTANCE MICRONS 200`. The final layout DBU is 0.005 microns.
@@ -42,9 +44,9 @@ DBUs without flattening the hierarchy.
   FILLER/LOC/SPACE directives.
 - Replace only selected block-variant user slots and make unused selected slots
   `gf180mcu_fd_io__asig_5p0` placeholders.
-- Detect malformed YAML, unsupported types, duplicate user pins, missing or
-  illegal `secondary_esd`, too many pins, sanitization collisions, missing
-  slots, fixed-instance collisions, and missing cell mappings.
+- Detect malformed YAML, unsupported types, duplicate user pins, malformed or
+  misplaced optional `secondary_esd`, too many pins, sanitization collisions,
+  missing slots, fixed-instance collisions, and missing cell mappings.
 - Generate machine-readable pin-to-slot metadata.
 - Build/run YosysHQ padring with every LEF required by the current cell map.
 - Parse GF180 LEF pin geometry and validate the project-facing terminal set.
@@ -53,6 +55,16 @@ DBUs without flattening the hierarchy.
   `--diearea` is mandatory.
 - Download `info.yaml -> project.lvs_config -> LAYOUT_FILE -> GDS` from GitHub,
   fetching fresh metadata even when local copies already exist.
+- Audit a GDS download report for PR-boundary and computed physical-content
+  dimensions, configured pad interfaces, and top-level text:
+
+  ```bash
+  python3 chipathon2026-system/scripts/gds_project_audit.py download.report \
+    --tech-pdk "$TECH_PDK" -o build/gds_project_audit.csv
+  ```
+  The audit implementation and KLayout helper are in
+  `chipathon2026-system/scripts/`; the authoritative requirements are in
+  section 32 of the repository-level `ChatGPT_spec.md`.
 
 ## Important strictness
 
@@ -185,8 +197,13 @@ make -f chipathon2026-system/Makefile.lvs run-lvs CHIP_CONFIG=integration.yaml
 
 `chipathon-build-project-defs` reads the integration YAML and generates the
 canonical project DEFs for every listed team. It uses each downloaded project's
-configured GDS, measures its top-cell outline, and runs the existing minimal
-variant-selection and project-DEF flow. Common paths and tools can be overridden
+configured GDS, measures its physical-content bounding box (non-tap/non-fill
+standard cells for digital layouts, or poly/diffusion/MIM-cap geometry for
+analog layouts), and runs the existing minimum-variant selection and
+project-DEF flow. Analog measurement excludes cells whose names contain
+`secondary_esd`, case-insensitively. The PR boundary remains for placement
+validation and does not determine the selected variant. Common paths and tools
+can be overridden
 with `--output-dir`, `--base-chip`, `--template`, `--padring`, `--pdk-root`,
 `--pdk`, `--tech-pdk`, and `--klayout`.
 
@@ -225,8 +242,9 @@ For bus pins, the qualifier is inserted before the unchanged bracket suffix:
 `DATA[0]` produces `DATA_PU[0]`, `DATA_PD[0]`, `DATA_IN[0]`, and
 `DATA_OUT[0]` as applicable. Malformed bracket syntax is rejected.
 
-The Makefile derives those dimensions automatically from the single top-cell
-rectangle on GDS layer `0/0` and combines them with the info.yaml pin count:
+The Makefile derives those dimensions automatically from the configured
+physical-content layers and standard-cell LEFs and combines them with the
+info.yaml pin count:
 
 ```bash
 make -f chipathon2026-system/Makefile.padframe project-def-A01
@@ -235,8 +253,9 @@ make -f chipathon2026-system/Makefile.padframe project-def-A01
 By default it reads `data/A01/info.yaml`, opens its repository-relative
 `project.lvs_config`, expands `LAYOUT_FILE`, and uses that exact path below
 `data/A01`; directory ordering and legacy GDS directories are never used. The
-outline layer is overrideable with
-`PROJECT_OUTLINE_LAYER` and `PROJECT_OUTLINE_DATATYPE`. One variant-specific
+PR-boundary layer remains overrideable with `PROJECT_OUTLINE_LAYER` and
+`PROJECT_OUTLINE_DATATYPE`; the standard-cell LEFs and KLayout layer properties
+can be overridden with `STANDARD_CELL_LEFS` and `LAYER_PROPERTIES`. One variant-specific
 padring and project DEF are written for every minimum-area fitting block type.
 
 ## Download flow
