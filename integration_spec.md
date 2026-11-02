@@ -718,6 +718,8 @@ invoked workflow. The downloader does not consume an integration YAML. For
 every team/repository entry in `repo.list`, the same invocation shall download:
 
 - `info.yaml`;
+- the optional export-control document named by `project.export_control` in
+  that `info.yaml`;
 - the `lvs_config.json` named by `project.lvs_config`;
 - the GDS named by the resolved `LAYOUT_FILE`;
 - every nonempty path in `LVS_SPICE_FILES`; and
@@ -729,9 +731,47 @@ resolved before repository paths are selected.  `$UPRJ_ROOT` denotes the root
 of that project's source repository during download.  Any other unresolved
 variable in a downloadable path is an error.
 
+`LVS_SPICE_FILES_TO_FIX` is deprecated. If it contains any nonempty string,
+whether supplied directly or in a list, project download and LVS-environment
+generation must reject that project with a clear configuration error. A
+missing key, an empty string, or an empty list is accepted but produces no
+downloaded source and is omitted from generated configurations.
+
+Within `lvs_config.json`, a file path beginning with `./` is equivalent to the
+same path beginning with `$UPRJ_ROOT/`. This applies to `LAYOUT_FILE` and every
+participant source-file field consumed by the downloader and generated LVS
+configuration. For example, `./verilog/gl/top.v` resolves to
+`$UPRJ_ROOT/verilog/gl/top.v`. A bare relative path without the leading `./`
+retains its existing meaning and is not implicitly converted.
+
 Ordinary GitHub files and Git LFS pointers are supported for both layout and
 netlist data.  Every transfer is checked for HTTP success; LFS objects are
 additionally checked for declared size and SHA-256 identity.
+
+When `project.export_control` is present, it must be a nonempty
+repository-relative path to one document in the same project repository. The
+path may begin with `$UPRJ_ROOT/` or `${UPRJ_ROOT}/`; this prefix denotes the
+repository root and is removed before resolving the repository-relative path.
+The same normalization applies to `project.lvs_config` in `info.yaml`. Any
+other unresolved path variable is invalid. The
+document is downloaded from the same immutable revision as the project's other
+artifacts. Its local destination is the shared export-control directory below
+the data root, and its basename is prefixed with the canonical team code:
+
+```text
+<data_root>/export_control/<TEAM>_<source-basename>
+```
+
+For example, `project.export_control: docs/export.pdf` for team `A01` is saved
+as `data/export_control/A01_export.pdf`. An absent key means that project has no
+export-control document to download. A present value of any other type, an
+empty value, an absolute or escaping path, or a missing document is an
+individual-project failure. If the document was downloaded successfully but
+that project later fails for another reason, retain the prefixed export-control
+document alongside the project tree preserved under the `_failed` name defined
+below. The download manifest records the source and destination when present.
+The corresponding failure entry also lists every retained export-control local
+path.
 
 The downloader prints progress before every file transfer. Each message
 identifies the team, repository and immutable revision, repository-relative
@@ -745,11 +785,13 @@ branch, using the Git remote symbolic `HEAD`; it must not use a per-repository
 GitHub API request for the normal path. The selected branch is then resolved to
 one immutable commit before downloading the project artifact set.
 
-All downloaded project artifacts preserve their full repository-relative paths
-below one common root:
+Except for the deliberately collected and team-prefixed export-control
+documents, downloaded project artifacts preserve their full
+repository-relative paths below one common root:
 
 ```text
 <data_root>/<TEAM>/info.yaml
+<data_root>/export_control/<TEAM>_<project.export_control basename>
 <data_root>/<TEAM>/<project.lvs_config repository-relative path>
 <data_root>/<TEAM>/<LAYOUT_FILE repository-relative path>
 <data_root>/<TEAM>/<LVS source repository-relative path>
@@ -764,8 +806,9 @@ data/A01/final/gds/chip_top.gds
 data/A01/final/pnl/chip_top.pnl.v
 ```
 
-Files are not flattened, renamed, or copied into separate GDS and netlist
-trees. Within generated configurations, `<TEAM>_ROOT` is the absolute path to
+GDS, LVS configuration, and netlist files are not flattened, renamed, or
+copied into separate GDS and netlist trees. Within generated configurations,
+`<TEAM>_ROOT` is the absolute path to
 `<data_root>/<TEAM>`, so the repository-relative suffix remains unchanged.
 
 Relative `include` directives inside SPICE or Verilog source files are not
@@ -799,10 +842,14 @@ Any expected failure while downloading or validating an individual project is
 isolated to that project. This includes malformed YAML or JSON, missing files,
 HTTP and Git failures, invalid configuration, unsupported relative includes,
 and local file-write errors. The downloader prints a concise team-qualified
-error rather than a Python traceback, removes the partial
-`<data_root>/<TEAM>` tree so it cannot be consumed, records the failure in the
-manifest, and continues with the remaining repositories. The command exits
-nonzero after completing the other downloads.
+error rather than a Python traceback and atomically renames an existing partial
+`<data_root>/<TEAM>` tree to `<data_root>/<TEAM>_failed`. This preserves the
+downloaded files for diagnosis while ensuring integration cannot consume them
+as successful project data. The manifest records the failure reason and failed
+directory path, and the downloader continues with the remaining repositories.
+If failure occurs before the team directory is created, no empty failed
+directory is required. The command exits nonzero after completing the other
+downloads.
 
 At the end of the operation, the downloader prints the number of successful
 and failed projects, followed by every failed project code and its recorded

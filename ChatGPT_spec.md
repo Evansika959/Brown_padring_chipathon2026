@@ -979,6 +979,37 @@ when package mapping is added.
 
 # **27\. Download script behavior**
 
+The package-provided download command is `chipathon-download-data`, implemented
+inside `chipathon2026-system` by the
+`chipathon2026_integration.fullchip_lvs_cli:download_main` entry point. It is
+not a program in the parent directory.
+
+For every repository-list project, inspect the optional
+`project.export_control` key in `info.yaml`. When present, it must name one
+nonempty, safe repository-relative document path. For both this key and
+`project.lvs_config`, accept a leading `$UPRJ_ROOT/` or `${UPRJ_ROOT}/` as the
+repository root and remove it before path resolution. No other unresolved
+variable is allowed. Download that document from
+the same immutable project revision as the other artifacts and save it as:
+
+```text
+<data_root>/export_control/<TEAM>_<source-basename>
+```
+
+An absent key requires no export-control download. An invalid value or missing
+document is an individual-project failure. If the export-control document was
+successfully downloaded before a later project failure, retain it for
+debugging and record its source and destination in the download manifest.
+
+When an individual project fails after its `<data_root>/<TEAM>` directory has
+been created, do not delete that directory. Atomically rename it to
+`<data_root>/<TEAM>_failed` so its partial files remain available for
+debugging, record that path in the failure manifest entry, and continue with
+the other projects. Integration must only consume the unsuffixed successful
+team directory. A failure before team-directory creation does not require an
+empty `_failed` directory. Any separately collected export-control document
+for a failed project is retained.
+
 The project download flow currently retrieves:
 
 info.yaml  
@@ -990,6 +1021,17 @@ lvs\_config.json
 LAYOUT\_FILE  
     ↓  
 GDS
+
+In `lvs_config.json`, treat a filename beginning with `./` as rooted at the
+participant repository: `./path/file` is equivalent to
+`$UPRJ_ROOT/path/file`. Apply this normalization to `LAYOUT_FILE` and all
+participant LVS SPICE and Verilog source-file fields. Do not implicitly convert
+bare relative paths that lack the leading `./`.
+
+`LVS_SPICE_FILES_TO_FIX` is deprecated and must not contain any nonempty file
+name. Reject a project during download or LVS-environment generation when the
+field is nonempty. Accept a missing key, empty string, or empty list, and omit
+the deprecated field from generated configurations.
 
 When saving downloaded metadata such as info.yaml, stale files should not silently be reused.
 

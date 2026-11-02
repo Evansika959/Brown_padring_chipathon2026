@@ -29,7 +29,16 @@ def get_lvs_config_reference(info: dict[str, Any]) -> str:
     value = project.get("lvs_config")
     if not isinstance(value, str) or not value.strip():
         raise ConfigError("info.yaml must contain a non-empty project.lvs_config string")
-    return value.strip()
+    value = value.strip()
+    for prefix in ("$UPRJ_ROOT/", "${UPRJ_ROOT}/"):
+        if value.startswith(prefix):
+            value = value.removeprefix(prefix)
+            break
+    if value in {"$UPRJ_ROOT", "${UPRJ_ROOT}"} or not value:
+        raise ConfigError(
+            "info.yaml project.lvs_config must name a file below $UPRJ_ROOT"
+        )
+    return value
 
 
 def validate_pins(

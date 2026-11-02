@@ -2,7 +2,8 @@ project:
   title: Example Project
   team: Example Team
   description: Example Chipathon 2026 project.
-  lvs_config: lvs_config.json
+  lvs_config: $UPRJ_ROOT/lvs_config.json
+  export_control: $UPRJ_ROOT/docs/export_control.pdf
 pins:
   - name: reset_n
     io_type: input_cmos
@@ -14,4 +15,3 @@ pins:
     io_type: bidirectional_24ma
   - name: "sensor[0]"
     io_type: analog
-    secondary_esd: true

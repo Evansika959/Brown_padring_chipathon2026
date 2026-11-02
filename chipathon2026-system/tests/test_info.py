@@ -6,6 +6,10 @@ from chipathon2026_integration.info import get_lvs_config_reference, validate_pi
 
 def test_project_lvs_config_only(minimal_info):
     assert get_lvs_config_reference(minimal_info) == "lvs_config.json"
+    minimal_info["project"]["lvs_config"] = "$UPRJ_ROOT/checks/lvs_config.json"
+    assert get_lvs_config_reference(minimal_info) == "checks/lvs_config.json"
+    minimal_info["project"]["lvs_config"] = "${UPRJ_ROOT}/config/lvs.json"
+    assert get_lvs_config_reference(minimal_info) == "config/lvs.json"
     with pytest.raises(ConfigError):
         get_lvs_config_reference({"lvs_config": "legacy.json", "pins": []})
 

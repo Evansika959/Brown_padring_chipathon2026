@@ -159,6 +159,22 @@ def test_standard_cell_definition_conflict_is_silent(tmp_path: Path):
     )
 
 
+def test_lvs_generation_rejects_nonempty_spice_files_to_fix(tmp_path: Path):
+    integration, data, integrated, output, lvs_root = _write_inputs(tmp_path)
+    config_path = data / "A01/config/lvs_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["LVS_SPICE_FILES_TO_FIX"] = ["$UPRJ_ROOT/cdl/fix.spice"]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(
+        ConfigError, match="LVS_SPICE_FILES_TO_FIX is deprecated and must be empty"
+    ):
+        generate_lvs_configs(
+            integration, data, integrated, output, lvs_root,
+            tmp_path / "pdks", "gf180mcuD",
+        )
+
+
 def test_unified_download_preserves_repository_paths_and_replaces_team_trees(tmp_path: Path, monkeypatch):
     integration, data, _integrated, _output, _lvs_root = _write_inputs(tmp_path)
     (data / "A01/obsolete.txt").write_text("old", encoding="utf-8")
@@ -167,13 +183,19 @@ def test_unified_download_preserves_repository_paths_and_replaces_team_trees(tmp
     configs = {
         "owner/a01": {"TOP_LAYOUT": "core", "LAYOUT_FILE": "$UPRJ_ROOT/layout/core.gds",
                       "LVS_VERILOG_FILES": ["$UPRJ_ROOT/netlist/core.v"]},
-        "owner/b02": {"TOP_LAYOUT": "B02_core", "LAYOUT_FILE": "$UPRJ_ROOT/layout/B02_core.gds",
-                      "LVS_SPICE_FILES": "$UPRJ_ROOT/netlist/B02_core.spice"},
+        "owner/b02": {"TOP_LAYOUT": "B02_core", "LAYOUT_FILE": "./layout/B02_core.gds",
+                      "LVS_SPICE_FILES": "./netlist/B02_core.spice"},
     }
 
     def fake_get(_session, repo, _ref, path):
         if path == "info.yaml":
-            return b"project:\n  lvs_config: checks/lvs_config.json\n"
+            if repo == "owner/a01":
+                return (
+                    b"project:\n"
+                    b"  lvs_config: $UPRJ_ROOT/checks/lvs_config.json\n"
+                    b"  export_control: ${UPRJ_ROOT}/docs/export.pdf\n"
+                )
+            return b"project:\n  lvs_config: ${UPRJ_ROOT}/checks/lvs_config.json\n"
         if path == "checks/lvs_config.json":
             return json.dumps(configs[repo]).encode()
         return f"downloaded:{repo}:{path}\n".encode()
@@ -202,8 +224,61 @@ def test_unified_download_preserves_repository_paths_and_replaces_team_trees(tmp
     assert (data / "A01/layout/core.gds").is_file()
     assert (data / "A01/netlist/core.v").is_file()
     assert (data / "A01/checks/lvs_config.json").is_file()
+    assert (data / "export_control/A01_export.pdf").read_bytes() == (
+        b"downloaded:owner/a01:docs/export.pdf\n"
+    )
     assert (data / "B02/netlist/B02_core.spice").is_file()
     assert all(item["revision"] == "a" * 40 for item in manifest["projects"])
+    a01 = next(item for item in manifest["projects"] if item["team"] == "A01")
+    assert a01["export_control"]["repository_path"] == "docs/export.pdf"
+    b02 = next(item for item in manifest["projects"] if item["team"] == "B02")
+    assert b02["export_control"] is None
+
+
+def test_failed_project_preserves_partial_tree_and_export_document(
+    tmp_path: Path, monkeypatch,
+):
+    data = tmp_path / "data"
+    repo_list = tmp_path / "repo.list"
+    repo_list.write_text("A01 owner/a01\n", encoding="utf-8")
+
+    def fake_get(_session, _repo, _ref, path):
+        if path == "info.yaml":
+            return (
+                b"project:\n"
+                b"  export_control: docs/export.pdf\n"
+                b"  lvs_config: missing.json\n"
+            )
+        if path == "docs/export.pdf":
+            return b"controlled document"
+        raise ConfigError(f"{path} is missing")
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+
+    monkeypatch.setattr(
+        "chipathon2026_integration.fullchip_lvs.get_repo_file", fake_get
+    )
+    monkeypatch.setattr(
+        "chipathon2026_integration.fullchip_lvs.resolve_repo_revision",
+        lambda _repo, _ref: "d" * 40,
+    )
+
+    manifest = download_projects(
+        repo_list, data, assume_yes=True, session=Session()
+    )
+
+    assert manifest["status"] == "partial"
+    assert not (data / "A01").exists()
+    assert (data / "A01_failed/info.yaml").is_file()
+    assert (data / "export_control/A01_export.pdf").read_bytes() == (
+        b"controlled document"
+    )
+    assert manifest["failures"][0]["failed_path"] == str(data / "A01_failed")
+    assert manifest["failures"][0]["retained_export_control"] == [
+        str(data / "export_control/A01_export.pdf")
+    ]
 
 
 def test_download_declines_removal_of_existing_data_root(tmp_path: Path):
@@ -272,6 +347,7 @@ def test_malformed_info_is_reported_purged_and_other_projects_continue(tmp_path:
     assert "[A01] ERROR: malformed info.yaml" in output.err
     assert "netlist/good.v ->" in output.out
     assert not (data / "A01").exists()
+    assert (data / "A01_failed/info.yaml").is_file()
     assert (data / "B02/gds/good.gds").is_file()
     assert manifest["status"] == "partial"
     assert manifest["failures"][0]["team"] == "A01"
@@ -310,6 +386,46 @@ def test_invalid_relative_include_is_reported_and_other_projects_continue(
     output = capsys.readouterr()
     assert "[A49] ERROR: cdl/top.spice contains unsupported relative include(s): child.spice" in output.err
     assert not (data / "A49").exists()
+    assert (data / "A49_failed/cdl/top.spice").is_file()
     assert (data / "B02/gds/top.gds").is_file()
     assert [project["team"] for project in manifest["projects"]] == ["B02"]
     assert manifest["failures"][0]["team"] == "A49"
+
+
+def test_download_rejects_nonempty_spice_files_to_fix(
+    tmp_path: Path, monkeypatch,
+):
+    data = tmp_path / "data"
+    repo_list = tmp_path / "repo.list"
+    repo_list.write_text("A01 owner/a01\n", encoding="utf-8")
+
+    def fake_get(_session, _repo, _ref, path):
+        if path == "info.yaml":
+            return b"project:\n  lvs_config: lvs_config.json\n"
+        if path == "lvs_config.json":
+            return json.dumps({
+                "LAYOUT_FILE": "$UPRJ_ROOT/gds/top.gds",
+                "LVS_SPICE_FILES_TO_FIX": "$UPRJ_ROOT/cdl/fix.spice",
+            }).encode()
+        raise AssertionError(f"unexpected download: {path}")
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+
+    monkeypatch.setattr(
+        "chipathon2026_integration.fullchip_lvs.get_repo_file", fake_get
+    )
+    monkeypatch.setattr(
+        "chipathon2026_integration.fullchip_lvs.resolve_repo_revision",
+        lambda _repo, _ref: "e" * 40,
+    )
+
+    manifest = download_projects(
+        repo_list, data, assume_yes=True, session=Session()
+    )
+
+    assert manifest["status"] == "partial"
+    assert "LVS_SPICE_FILES_TO_FIX is deprecated" in manifest["failures"][0]["error"]
+    assert (data / "A01_failed/lvs_config.json").is_file()
+    assert not (data / "A01_failed/cdl/fix.spice").exists()

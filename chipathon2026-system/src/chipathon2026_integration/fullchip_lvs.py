@@ -27,7 +27,8 @@ LVS_BRANCH = "wafer.space-run1"
 RAW_ROOT = "https://raw.githubusercontent.com"
 LFS_BATCH_ROOT = "https://github.com"
 LFS_VERSION = "https://git-lfs.github.com/spec/v1"
-SOURCE_KEYS = ("LVS_SPICE_FILES_TO_FIX", "LVS_SPICE_FILES", "LVS_VERILOG_FILES")
+DEPRECATED_SOURCE_KEY = "LVS_SPICE_FILES_TO_FIX"
+SOURCE_KEYS = ("LVS_SPICE_FILES", "LVS_VERILOG_FILES")
 LIST_KEYS = (
     "EXTRACT_FLATGLOB", "EXTRACT_ABSTRACT", "EXTRACT_CREATE_SUBCUT",
     "LVS_FLATTEN", "LVS_NOFLATTEN", "LVS_IGNORE", *SOURCE_KEYS,
@@ -48,6 +49,13 @@ def _as_list(value: Any, key: str) -> list[str]:
     if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
         raise ConfigError(f"{key} must be a string or list of strings")
     return [item.strip() for item in values if item.strip()]
+
+
+def _reject_deprecated_sources(config: dict[str, Any]) -> None:
+    if _as_list(config.get(DEPRECATED_SOURCE_KEY), DEPRECATED_SOURCE_KEY):
+        raise ConfigError(
+            f"{DEPRECATED_SOURCE_KEY} is deprecated and must be empty"
+        )
 
 
 def load_repo_list(path: Path) -> dict[str, Repository]:
@@ -76,10 +84,16 @@ def _raw_url(repo: str, ref: str, path: str) -> str:
 
 def _safe_repo_relative(value: str, context: str) -> str:
     value = value.strip()
+    for prefix in ("$UPRJ_ROOT/", "${UPRJ_ROOT}/"):
+        if value.startswith(prefix):
+            value = value.removeprefix(prefix)
+            break
     while value.startswith("./"):
         value = value[2:]
     path = PurePosixPath(value)
-    if not value or path.is_absolute() or ".." in path.parts:
+    if (not value or value in {"$UPRJ_ROOT", "${UPRJ_ROOT}"}
+            or VARIABLE_RE.search(value) or path.is_absolute()
+            or ".." in path.parts):
         raise ConfigError(f"unsafe repository-relative {context}: {value!r}")
     return path.as_posix()
 
@@ -187,6 +201,8 @@ def _repo_path(value: str, config: dict[str, Any]) -> str | None:
                 candidate = final.replace("${UPRJ_ROOT}", "$UPRJ_ROOT")
                 break
     candidate = (candidate or value).replace("${UPRJ_ROOT}", "$UPRJ_ROOT")
+    if candidate.startswith("./"):
+        candidate = "$UPRJ_ROOT/" + candidate.removeprefix("./")
     if "$UPRJ_ROOT" not in candidate:
         return None
     if not candidate.startswith("$UPRJ_ROOT/") or VARIABLE_RE.search(candidate.removeprefix("$UPRJ_ROOT/")):
@@ -248,7 +264,43 @@ def _download_project(
     if not isinstance(info, dict):
         raise ConfigError("info.yaml top level is not a mapping")
 
-    lvs_reference = info.get("project", {}).get("lvs_config")
+    project = info.get("project")
+    if not isinstance(project, dict):
+        raise ConfigError("info.yaml project must be a mapping")
+
+    export_control = None
+    if "export_control" in project:
+        export_reference = project["export_control"]
+        if not isinstance(export_reference, str) or not export_reference.strip():
+            raise ConfigError(
+                "info.yaml project.export_control must be a nonempty "
+                "repository-relative path"
+            )
+        export_reference = _safe_repo_relative(
+            export_reference, "project.export_control"
+        )
+        export_path = (
+            data_root / "export_control"
+            / f"{repo.team}_{PurePosixPath(export_reference).name}"
+        )
+        print(
+            f"[{repo.team}] downloading {repo.name}@{revision}:"
+            f"{export_reference} -> {export_path}",
+            flush=True,
+        )
+        export_data = get_repo_file(
+            session, repo.name, revision, export_reference
+        )
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        export_path.write_bytes(export_data)
+        export_control = {
+            "repository_path": export_reference,
+            "local_path": str(export_path),
+            "size": len(export_data),
+            "sha256": hashlib.sha256(export_data).hexdigest(),
+        }
+
+    lvs_reference = project.get("lvs_config")
     if not isinstance(lvs_reference, str) or not lvs_reference.strip():
         raise ConfigError("info.yaml has no project.lvs_config")
     lvs_reference = _safe_repo_relative(lvs_reference, "project.lvs_config")
@@ -261,6 +313,9 @@ def _download_project(
         config = json.loads(lvs_data)
     except json.JSONDecodeError as exc:
         raise ConfigError(f"malformed lvs_config.json: {exc}") from exc
+    if not isinstance(config, dict):
+        raise ConfigError("lvs_config.json top level is not a JSON object")
+    _reject_deprecated_sources(config)
 
     downloaded_paths: set[str] = set()
     source_files: list[dict[str, Any]] = []
@@ -272,14 +327,14 @@ def _download_project(
             destination = team_root / relative
             print(f"[{repo.team}] downloading {repo.name}@{revision}:{relative} -> {destination}", flush=True)
             data = get_repo_file(session, repo.name, revision, relative)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
             includes = relative_includes(data)
             if includes:
                 raise ConfigError(
                     f"{relative} contains unsupported relative include(s): "
                     + ", ".join(includes)
                 )
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(data)
             downloaded_paths.add(relative)
             source_files.append({
                 "repository_path": relative, "local_path": str(destination),
@@ -290,8 +345,10 @@ def _download_project(
     if not isinstance(layout, str):
         raise ConfigError("invalid LAYOUT_FILE")
     layout = layout.replace("${UPRJ_ROOT}", "$UPRJ_ROOT")
+    if layout.startswith("./"):
+        layout = "$UPRJ_ROOT/" + layout.removeprefix("./")
     if not layout.startswith("$UPRJ_ROOT/"):
-        raise ConfigError("LAYOUT_FILE must begin with $UPRJ_ROOT")
+        raise ConfigError("LAYOUT_FILE must begin with $UPRJ_ROOT/ or ./")
     layout_relative = _safe_repo_relative(
         layout.removeprefix("$UPRJ_ROOT/"), "LAYOUT_FILE"
     )
@@ -307,6 +364,7 @@ def _download_project(
                  "local_path": str(team_root / "info.yaml"),
                  "size": len(info_data),
                  "sha256": hashlib.sha256(info_data).hexdigest()},
+        "export_control": export_control,
         "lvs_config": {"repository_path": lvs_reference,
                        "local_path": str(lvs_path), "size": len(lvs_data),
                        "sha256": hashlib.sha256(lvs_data).hexdigest()},
@@ -341,17 +399,40 @@ def download_projects(
     failures = []
     for repo in repositories:
         team_root = data_root / repo.team
+        failed_root = data_root / f"{repo.team}_failed"
         try:
             projects.append(_download_project(session, repo, data_root))
         except (ConfigError, OSError, requests.RequestException,
                 subprocess.CalledProcessError, ValueError) as exc:
             message = str(exc)
-            print(f"[{repo.team}] ERROR: {message}; removing {team_root}",
+            disposition = (
+                f"preserving partial data as {failed_root}"
+                if team_root.exists()
+                else "no project directory was created"
+            )
+            print(f"[{repo.team}] ERROR: {message}; {disposition}",
                   file=sys.stderr, flush=True)
             if team_root.exists():
-                shutil.rmtree(team_root)
-            failures.append({"team": repo.team, "repository": repo.name,
-                             "error": message})
+                if failed_root.exists():
+                    raise ConfigError(
+                        f"cannot preserve failed project because destination exists: "
+                        f"{failed_root}"
+                    )
+                os.replace(team_root, failed_root)
+            export_root = data_root / "export_control"
+            prefix = f"{repo.team}_"
+            retained_export_control = sorted(
+                str(candidate)
+                for candidate in export_root.iterdir()
+                if candidate.is_file() and candidate.name.startswith(prefix)
+            ) if export_root.is_dir() else []
+            failures.append({
+                "team": repo.team,
+                "repository": repo.name,
+                "error": message,
+                "failed_path": str(failed_root) if failed_root.exists() else None,
+                "retained_export_control": retained_export_control,
+            })
     return {
         "schema_version": 1, "repo_list": str(repo_list),
         "status": "partial" if failures else "complete",
@@ -468,6 +549,7 @@ def generate_lvs_configs(
         team, team_upper = request.team, request.team.upper()
         _info_path, lvs_path, _gds_path = resolve_project_data(data_root, team)
         original = load_lvs_config(lvs_path)
+        _reject_deprecated_sources(original)
         team_root = data_root / team
         team_roots[team_upper] = team_root.resolve()
         library = original.get("STD_CELL_LIBRARY")

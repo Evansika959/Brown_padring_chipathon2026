@@ -53,7 +53,8 @@ DBUs without flattening the hierarchy.
 - Generate an operator-gated virtual-interface DEF from a padring-generated DEF
   plus LEF geometry; because the canonical project DIEAREA is not finalized,
   `--diearea` is mandatory.
-- Download `info.yaml -> project.lvs_config -> LAYOUT_FILE -> GDS` from GitHub,
+- Download `info.yaml`, an optional `project.export_control` document,
+  `project.lvs_config`, `LAYOUT_FILE`, and LVS source files from GitHub,
   fetching fresh metadata even when local copies already exist.
 - Audit a GDS download report for PR-boundary and computed physical-content
   dimensions, configured pad interfaces, and top-level text:
@@ -264,11 +265,26 @@ padring and project DEF are written for every minimum-area fitting block type.
 chipathon-download-data repo.list --data-root data
 ```
 
+When `project.export_control` is present in a project's `info.yaml`, its
+repository-relative document is saved as
+`data/export_control/<TEAM>_<original-filename>`.
+Both `project.export_control` and `project.lvs_config` may start with
+`$UPRJ_ROOT/`; the downloader treats that prefix as the project repository root.
+Within `lvs_config.json`, a leading `./` on `LAYOUT_FILE` or a participant LVS
+source path is likewise treated as `$UPRJ_ROOT/`.
+`LVS_SPICE_FILES_TO_FIX` is deprecated; a nonempty value is a project error.
+
 This command recreates `data` and downloads every project in `repo.list`: its
 info, original LVS configuration, GDS, and listed netlists from one immutable
 repository revision. Files are written to their final repository-relative paths
 as they arrive, so progress is visible on disk and an interrupted run may leave
 a partial directory that must be replaced on the next run.
+
+If an individual project download fails after its directory has been created,
+the partial directory is retained as `data/<TEAM>_failed` for debugging. Other
+projects continue downloading, and integration ignores the suffixed directory.
+Any export-control document downloaded before the failure is also retained in
+`data/export_control`.
 
 ## Install and test
 
