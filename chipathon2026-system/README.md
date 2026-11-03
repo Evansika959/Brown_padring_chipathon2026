@@ -270,8 +270,14 @@ repository-relative document is saved as
 `data/export_control/<TEAM>_<original-filename>`.
 Both `project.export_control` and `project.lvs_config` may start with
 `$UPRJ_ROOT/`; the downloader treats that prefix as the project repository root.
-Within `lvs_config.json`, a leading `./` on `LAYOUT_FILE` or a participant LVS
-source path is likewise treated as `$UPRJ_ROOT/`.
+Within `lvs_config.json`, bare relative paths and a leading `./` on
+`LAYOUT_FILE` or a participant LVS source path are treated as relative to
+`$UPRJ_ROOT/`.
+SPICE `.include` and `.inc` files are downloaded recursively from the same
+revision, relative to the containing file (or `$UPRJ_ROOT/` when specified).
+Paths may use `..` within the repository; paths escaping it are rejected.
+Repeated includes and cycles are downloaded once. Absolute and external
+variable-based include paths are left for the LVS environment to supply.
 `LVS_SPICE_FILES_TO_FIX` is deprecated; a nonempty value is a project error.
 
 This command recreates `data` and downloads every project in `repo.list`: its

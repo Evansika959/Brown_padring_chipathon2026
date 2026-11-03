@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -201,7 +202,7 @@ def _repo_path(value: str, config: dict[str, Any]) -> str | None:
                 candidate = final.replace("${UPRJ_ROOT}", "$UPRJ_ROOT")
                 break
     candidate = (candidate or value).replace("${UPRJ_ROOT}", "$UPRJ_ROOT")
-    if candidate.startswith("./"):
+    if candidate.startswith("./") or (candidate and not candidate.startswith(("/", "$"))):
         candidate = "$UPRJ_ROOT/" + candidate.removeprefix("./")
     if "$UPRJ_ROOT" not in candidate:
         return None
@@ -319,36 +320,55 @@ def _download_project(
 
     downloaded_paths: set[str] = set()
     source_files: list[dict[str, Any]] = []
+
+    def download_source(relative: str, *, spice: bool) -> None:
+        if relative in downloaded_paths:
+            return
+        destination = team_root / relative
+        print(f"[{repo.team}] downloading {repo.name}@{revision}:{relative} -> {destination}", flush=True)
+        data = get_repo_file(session, repo.name, revision, relative)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
+        downloaded_paths.add(relative)
+        source_files.append({
+            "repository_path": relative, "local_path": str(destination),
+            "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+        })
+        if spice:
+            pattern = r'''(?im)^\s*\.(?:include|inc)\s+(?:"([^"]+)"|'([^']+)'|([^\s]+))'''
+            for match in re.finditer(pattern, data.decode("utf-8", errors="replace")):
+                included = next(group for group in match.groups() if group is not None)
+                if included.startswith(("$UPRJ_ROOT/", "${UPRJ_ROOT}/")):
+                    child = _safe_repo_relative(included, f"include in {relative}")
+                elif included.startswith(("/", "$")):
+                    continue
+                else:
+                    child = _safe_repo_relative(
+                        posixpath.normpath(posixpath.join(posixpath.dirname(relative), included)),
+                        f"include in {relative}",
+                    )
+                download_source(child, spice=True)
+        elif relative_includes(data):
+            raise ConfigError(
+                f"{relative} contains unsupported relative include(s): "
+                + ", ".join(relative_includes(data))
+            )
+
     for key in SOURCE_KEYS:
         for value in _as_list(config.get(key), key):
             relative = _repo_path(value, config)
             if relative is None or relative in downloaded_paths:
                 continue
-            destination = team_root / relative
-            print(f"[{repo.team}] downloading {repo.name}@{revision}:{relative} -> {destination}", flush=True)
-            data = get_repo_file(session, repo.name, revision, relative)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(data)
-            includes = relative_includes(data)
-            if includes:
-                raise ConfigError(
-                    f"{relative} contains unsupported relative include(s): "
-                    + ", ".join(includes)
-                )
-            downloaded_paths.add(relative)
-            source_files.append({
-                "repository_path": relative, "local_path": str(destination),
-                "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
-            })
+            download_source(relative, spice=key == "LVS_SPICE_FILES")
 
     layout = resolve_json_variables(config).get("LAYOUT_FILE")
     if not isinstance(layout, str):
         raise ConfigError("invalid LAYOUT_FILE")
     layout = layout.replace("${UPRJ_ROOT}", "$UPRJ_ROOT")
-    if layout.startswith("./"):
+    if layout.startswith("./") or (layout and not layout.startswith(("/", "$"))):
         layout = "$UPRJ_ROOT/" + layout.removeprefix("./")
     if not layout.startswith("$UPRJ_ROOT/"):
-        raise ConfigError("LAYOUT_FILE must begin with $UPRJ_ROOT/ or ./")
+        raise ConfigError("LAYOUT_FILE must be repository-relative or begin with $UPRJ_ROOT/")
     layout_relative = _safe_repo_relative(
         layout.removeprefix("$UPRJ_ROOT/"), "LAYOUT_FILE"
     )

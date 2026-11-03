@@ -175,7 +175,8 @@ def test_lvs_generation_rejects_nonempty_spice_files_to_fix(tmp_path: Path):
         )
 
 
-def test_unified_download_preserves_repository_paths_and_replaces_team_trees(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize("prefix", ["$UPRJ_ROOT/", "${UPRJ_ROOT}/", "./", ""])
+def test_unified_download_preserves_repository_paths_and_replaces_team_trees(tmp_path: Path, monkeypatch, prefix):
     integration, data, _integrated, _output, _lvs_root = _write_inputs(tmp_path)
     (data / "A01/obsolete.txt").write_text("old", encoding="utf-8")
     repo_list = tmp_path / "repo.list"
@@ -183,8 +184,8 @@ def test_unified_download_preserves_repository_paths_and_replaces_team_trees(tmp
     configs = {
         "owner/a01": {"TOP_LAYOUT": "core", "LAYOUT_FILE": "$UPRJ_ROOT/layout/core.gds",
                       "LVS_VERILOG_FILES": ["$UPRJ_ROOT/netlist/core.v"]},
-        "owner/b02": {"TOP_LAYOUT": "B02_core", "LAYOUT_FILE": "./layout/B02_core.gds",
-                      "LVS_SPICE_FILES": "./netlist/B02_core.spice"},
+        "owner/b02": {"TOP_LAYOUT": "B02_core", "LAYOUT_FILE": f"{prefix}layout/B02_core.gds",
+                      "LVS_SPICE_FILES": f"{prefix}netlist/B02_core.spice"},
     }
 
     def fake_get(_session, repo, _ref, path):
@@ -228,6 +229,7 @@ def test_unified_download_preserves_repository_paths_and_replaces_team_trees(tmp
         b"downloaded:owner/a01:docs/export.pdf\n"
     )
     assert (data / "B02/netlist/B02_core.spice").is_file()
+    assert (data / "B02/layout/B02_core.gds").is_file()
     assert all(item["revision"] == "a" * 40 for item in manifest["projects"])
     a01 = next(item for item in manifest["projects"] if item["team"] == "A01")
     assert a01["export_control"]["repository_path"] == "docs/export.pdf"
@@ -353,14 +355,18 @@ def test_malformed_info_is_reported_purged_and_other_projects_continue(tmp_path:
     assert manifest["failures"][0]["team"] == "A01"
 
 
-def test_invalid_relative_include_is_reported_and_other_projects_continue(
-    tmp_path: Path, monkeypatch, capsys,
+@pytest.mark.parametrize("unsafe", [False, True])
+def test_spice_includes_are_downloaded_and_unsafe_paths_fail(
+    tmp_path: Path, monkeypatch, capsys, unsafe,
 ):
     data = tmp_path / "data"
     repo_list = tmp_path / "repo.list"
     repo_list.write_text("A49 owner/bad\nB02 owner/good\n", encoding="utf-8")
 
+    transfers = []
+
     def fake_get(_session, repo, _ref, path):
+        transfers.append((repo, _ref, path))
         if path == "info.yaml":
             return b"project:\n  lvs_config: lvs_config.json\n"
         if path == "lvs_config.json":
@@ -369,7 +375,13 @@ def test_invalid_relative_include_is_reported_and_other_projects_continue(
                 "LVS_SPICE_FILES": ["$UPRJ_ROOT/cdl/top.spice"],
             }).encode()
         if path == "cdl/top.spice" and repo == "owner/bad":
-            return b'.include "child.spice"\n'
+            if unsafe:
+                return b'.include "../../outside.spice"\n'
+            return b'.INCLUDE "child.spice"\n.inc \'../models/device model.spice\'\n'
+        if path == "cdl/child.spice":
+            return b'.include "top.spice"\n.include "$UPRJ_ROOT/models/shared.spice"\n'
+        if path == "models/device model.spice":
+            return b'.include "shared.spice"\n'
         return b"downloaded"
 
     class Session:
@@ -384,12 +396,21 @@ def test_invalid_relative_include_is_reported_and_other_projects_continue(
     manifest = download_projects(repo_list, data, assume_yes=True, session=Session())
 
     output = capsys.readouterr()
-    assert "[A49] ERROR: cdl/top.spice contains unsupported relative include(s): child.spice" in output.err
-    assert not (data / "A49").exists()
-    assert (data / "A49_failed/cdl/top.spice").is_file()
     assert (data / "B02/gds/top.gds").is_file()
-    assert [project["team"] for project in manifest["projects"]] == ["B02"]
-    assert manifest["failures"][0]["team"] == "A49"
+    if unsafe:
+        assert "unsafe repository-relative include in cdl/top.spice" in output.err
+        assert not (data / "A49").exists()
+        assert (data / "A49_failed/cdl/top.spice").is_file()
+        assert [project["team"] for project in manifest["projects"]] == ["B02"]
+        assert manifest["failures"][0]["team"] == "A49"
+    else:
+        assert not manifest["failures"]
+        expected = {"cdl/top.spice", "cdl/child.spice", "models/device model.spice", "models/shared.spice"}
+        sources = manifest["projects"][0]["source_files"]
+        assert {source["repository_path"] for source in sources} == expected
+        for path in expected:
+            assert (data / "A49" / path).is_file()
+            assert transfers.count(("owner/bad", "c" * 40, path)) == 1
 
 
 def test_download_rejects_nonempty_spice_files_to_fix(
