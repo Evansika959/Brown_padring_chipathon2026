@@ -183,10 +183,14 @@ def parse_download_report(path: Path) -> list[ReportRecord]:
     """Parse project records from a downloader report, preserving order."""
     records: list[ReportRecord] = []
     current: ReportRecord | None = None
+    data_root: Path | None = None
 
     with path.open("r", encoding="utf-8", errors="replace") as f:
         for raw_line in f:
             line = raw_line.rstrip("\r\n")
+            if line.startswith("Data root: "):
+                data_root = resolve_report_path(line.removeprefix("Data root: "), path.resolve().parent)
+                continue
 
             match = RECORD_RE.match(line)
             if match:
@@ -196,6 +200,8 @@ def parse_download_report(path: Path) -> list[ReportRecord]:
                     team=match.group(1),
                     repository=match.group(2).strip(),
                 )
+                if data_root is not None:
+                    current.fields["project_root"] = str(data_root / current.team)
                 continue
 
             if current is None:
@@ -203,7 +209,10 @@ def parse_download_report(path: Path) -> list[ReportRecord]:
 
             match = FIELD_RE.match(line)
             if match:
-                current.fields[match.group(1).strip()] = match.group(2).strip()
+                key, value = match.group(1).strip(), match.group(2).strip()
+                if key in {"info.yaml", "lvs_config", "export_control", "GDS saved"}:
+                    value = re.sub(r":\s*[0-9a-fA-F]{64}$", "", value)
+                current.fields[key] = value
 
     if current is not None:
         records.append(current)
@@ -831,12 +840,12 @@ def row_for_project(
     inspection: GdsInspection | None = None
 
     info_path = (
-        resolve_report_path(record.info_yaml, base_dir)
+        resolve_report_path(record.info_yaml, Path(record.fields.get("project_root", base_dir)))
         if record.info_yaml
         else None
     )
     gds_path = (
-        resolve_report_path(record.gds_saved, base_dir)
+        resolve_report_path(record.gds_saved, Path(record.fields.get("project_root", base_dir)))
         if record.gds_saved
         else None
     )

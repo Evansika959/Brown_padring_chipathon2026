@@ -282,13 +282,13 @@ def test_failed_project_preserves_partial_tree_and_export_document(
     report = tmp_path / "download.report"
     write_download_report(report, manifest)
     text = report.read_text()
-    assert f"  info.yaml: {(data / 'A01_failed/info.yaml').resolve()}" in text
+    assert "  info.yaml: info.yaml: " in text
     assert "  lvs_config: NOT FOUND: missing.json" in text
     if missing_export:
         assert "  export_control: NOT FOUND: docs/export.pdf" in text
         assert not manifest["failures"][0]["retained_export_control"]
         return
-    assert f"  export_control: {(data / 'export_control/A01_export.pdf').resolve()}" in text
+    assert "  export_control: ../export_control/A01_export.pdf: " in text
     assert (data / "export_control/A01_export.pdf").read_bytes() == (
         b"controlled document"
     )

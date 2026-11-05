@@ -274,16 +274,23 @@ chipathon-download-data repo.list --data-root data --report download.report
 python3 scripts/gds_project_audit.py download.report -o gds_project_audit.csv
 ```
 
-The report uses absolute artifact paths and includes successful and failed
+The report uses project-relative artifact paths and includes successful and failed
 projects. Failed projects have no `GDS saved` entry and are skipped by the
 audit. Progress logs remain on the console; `tee` is no longer needed to
 create the report. Reports are written after project processing completes,
 including runs with individual project failures.
 Records follow `repo.list` order, including failed designs. Every record has
-an `info.yaml` line with the absolute saved path, including retained files in
+an `info.yaml` line with the project-relative saved path, including retained files in
 `<TEAM>_failed` after a later error, or `none` if no file was saved.
+Saved file fields (`info.yaml`, `lvs_config`, `export_control`, and `GDS saved`)
+use `project-relative-path: sha256`, with the 64-digit hexadecimal SHA-256 of the saved
+file. Status values such as `none` and `NOT FOUND: filename` have no checksum.
+The audit parser accepts both checksummed and older plain-path reports.
+File paths are relative to `data_root/TEAM` (`TEAM_failed` for failed designs).
+Shared export documents use `../export_control/filename`. The `Data root`
+header locates the data root relative to the report directory for auditing.
 Each record includes `lvs_config` and `export_control` lines. Downloaded files
-use absolute paths. Export control is `none` when absent from `info.yaml`, or
+use project-relative paths. Export control is `none` when absent from `info.yaml`, or
 `NOT FOUND: filename` when declared but unavailable (the project still fails).
 Failed records preserve these details and point to retained files where available.
 `unknown` means the project failed before its metadata could be read; invalid

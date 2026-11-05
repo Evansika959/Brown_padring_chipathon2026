@@ -476,6 +476,7 @@ def download_projects(
             })
     return {
         "schema_version": 1, "repo_list": str(repo_list),
+        "data_root": str(data_root.resolve()),
         "status": "partial" if failures else "complete",
         "projects": projects, "failures": failures,
         "repository_order": [repo.team for repo in repositories],

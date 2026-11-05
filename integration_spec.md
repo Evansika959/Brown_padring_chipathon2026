@@ -856,18 +856,31 @@ and failed projects. It also writes `data_root/download.report` alongside
 `download_manifest.json`; `--report PATH` overrides the report destination.
 The UTF-8 report preserves the legacy downloader grammar: each record starts
 with `TEAM: owner/repository`. Successful records contain indented `info.yaml`,
-`TOP_LAYOUT`, and `GDS saved` fields. File paths are absolute and `TOP_LAYOUT`
+`TOP_LAYOUT`, and `GDS saved` fields. File paths are relative to the project directory and `TOP_LAYOUT`
 is the resolved configuration value, also recorded as `top_layout` in the
 JSON manifest. Failed records contain an indented `ERROR` field and never
 `GDS saved`, even if a partial GDS exists. Multiline errors are flattened to
 one line. Records follow repository-list order, interleaving successful and
 failed designs, followed by `Successful: N` and `Failed: N` summary lines.
 The manifest records this order in `repository_order`. Every record includes
-`info.yaml`: the absolute saved path, including the relocated failed-project
+`info.yaml`: the project-relative saved path, including the relocated failed-project
 path after subsequent errors, or `none` if no file was saved. Failed manifest
 entries retain the saved path in `info.local_path`, or `info: null`.
+All saved file fields (`info.yaml`, `lvs_config`, `export_control`, `GDS saved`)
+are relative to `data_root/TEAM` (or `data_root/TEAM_failed` for failed designs).
+A `Data root: path` header identifies the data root relative to the report's
+directory; the manifest records its absolute `data_root` separately. Shared
+export documents use `../export_control/filename`. The audit uses the header
+and team code to resolve paths, while retaining support for legacy reports.
+All saved file fields
+append `: ` and the saved file's 64-digit hexadecimal SHA-256 checksum to the
+project-relative path, including files retained after project failure. Status values
+such as `none`, `unknown`, `invalid: value`, and `NOT FOUND: filename` have no
+checksum. Audit consumers must accept both this form and legacy plain paths,
+stripping only a terminal colon followed by a 64-digit hexadecimal checksum
+before resolving a file path.
 Every record also includes `lvs_config` and `export_control`:
-downloaded files use absolute paths, including relocated failed-project files.
+downloaded files use project-relative paths, including relocated failed-project files.
 An absent export-control declaration is `none`; a declared document that cannot
 be retrieved is `NOT FOUND: filename`, retaining the project failure behavior.
 Unavailable declared LVS configurations likewise use `NOT FOUND: filename`.

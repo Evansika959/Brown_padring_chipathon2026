@@ -987,20 +987,26 @@ not a program in the parent directory.
 The command automatically writes a legacy-compatible `data_root/download.report`
 alongside `download_manifest.json`. `--report PATH` overrides the report path.
 Each successful `TEAM: repository` record contains indented `info.yaml`,
-`TOP_LAYOUT`, and `GDS saved` fields, with absolute artifact paths and the
+`TOP_LAYOUT`, and `GDS saved` fields, with project-relative artifact paths and the
 resolved layout top name. Failed records contain `ERROR` and no `GDS saved`.
 Records follow repository-list order, including failures, followed by
 `Successful` and `Failed` counts. Every record includes `info.yaml` with the
-absolute saved path (including retained failed-project paths), or `none` when
+project-relative saved path (including retained failed-project paths), or `none` when
 no file was saved. The report is written for partial-success runs too; report-write
 failure makes the command fail. Progress logs remain separate from the report.
-Each record includes `lvs_config` and `export_control` lines with absolute
+Each record includes `lvs_config` and `export_control` lines with project-relative
 downloaded paths. Export control is `none` if undeclared and
 `NOT FOUND: filename` if declared but unavailable; such a download failure
 still fails the project. Failed records retain available paths, including
 relocated LVS configurations. Unread metadata uses `unknown`, invalid export
 declarations use `invalid: value`, and missing declared LVS configurations
 use `NOT FOUND: filename`.
+Saved file fields in the report use `project-relative-path: sha256`, where `sha256`
+is the saved file's 64-digit hexadecimal SHA-256 digest. Status values have no
+checksum. The audit parser must support both this form and legacy plain paths.
+Paths are relative to `data_root/TEAM` (or `TEAM_failed` for failed projects).
+A `Data root` header gives the data root relative to the report directory;
+shared export documents use `../export_control/filename`.
 The detailed report contract is specified in integration_spec.md section 19.3.
 
 For every repository-list project, inspect the optional

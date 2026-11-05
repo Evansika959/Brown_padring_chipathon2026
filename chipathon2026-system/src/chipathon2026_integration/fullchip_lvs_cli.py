@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -32,29 +33,38 @@ def write_download_report(path: Path, manifest: dict) -> None:
     def single_line(value: object) -> str:
         return " ".join(str(value).splitlines())
 
-    lines = []
+    def file_field(value: str) -> str:
+        if value in {"none", "unknown"} or value.startswith(("NOT FOUND: ", "invalid: ")):
+            return single_line(value)
+        saved = Path(value).resolve()
+        return f"{Path(os.path.relpath(saved, project_root)).as_posix()}: {file_sha256(saved)}"
+
+    data_root = Path(manifest["data_root"]).resolve()
+    lines = [f'Data root: {Path(os.path.relpath(data_root, path.resolve().parent)).as_posix()}']
     entries = {entry["team"]: entry for entry in (*manifest["projects"], *manifest["failures"])}
     for team in manifest.get("repository_order", entries):
         project = entries[team]
+        project_root = data_root / team
         if "error" in project:
+            project_root = Path(project.get("failed_path") or data_root / f"{team}_failed").resolve()
             fields = project.get("report_fields", {})
             info = project.get("info")
             lines.extend([
                 f'{project["team"]}: {single_line(project["repository"])}',
-                f'  info.yaml: {Path(info["local_path"]).resolve() if info else "none"}',
-                f'  lvs_config: {single_line(fields.get("lvs_config", "unknown"))}',
-                f'  export_control: {single_line(fields.get("export_control", "unknown"))}',
+                f'  info.yaml: {file_field(info["local_path"]) if info else "none"}',
+                f'  lvs_config: {file_field(fields.get("lvs_config", "unknown"))}',
+                f'  export_control: {file_field(fields.get("export_control", "unknown"))}',
                 f'  ERROR: {single_line(project["error"])}',
             ])
             continue
         export = project.get("export_control")
         lines.extend([
             f'{project["team"]}: {single_line(project["repository"])}',
-            f'  info.yaml: {Path(project["info"]["local_path"]).resolve()}',
-            f'  lvs_config: {Path(project["lvs_config"]["local_path"]).resolve()}',
-            f'  export_control: {Path(export["local_path"]).resolve() if export else "none"}',
+            f'  info.yaml: {file_field(project["info"]["local_path"])}',
+            f'  lvs_config: {file_field(project["lvs_config"]["local_path"])}',
+            f'  export_control: {file_field(export["local_path"]) if export else "none"}',
             f'  TOP_LAYOUT: {single_line(project["top_layout"])}',
-            f'  GDS saved: {Path(project["layout_file"]["local_path"]).resolve()}',
+            f'  GDS saved: {file_field(project["layout_file"]["local_path"])}',
         ])
     lines.extend([
         f'Successful: {len(manifest["projects"])}',

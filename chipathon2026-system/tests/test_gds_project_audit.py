@@ -17,6 +17,7 @@ class ReportParserTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td).resolve()
             manifest = {
+                "data_root": str(root / "data"),
                 "repository_order": ["A02", "A01", "A03"],
                 "projects": [{
                     "team": "A01", "repository": "owner/good", "top_layout": "top",
@@ -33,6 +34,12 @@ class ReportParserTests(unittest.TestCase):
 
             def download(*args, **kwargs):
                 (root / "data").mkdir(exist_ok=True)
+                for entry in (*manifest["projects"], *manifest["failures"]):
+                    for key in ("info", "lvs_config", "layout_file"):
+                        if key in entry:
+                            saved = Path(entry[key]["local_path"])
+                            saved.parent.mkdir(parents=True, exist_ok=True)
+                            saved.write_bytes(b"test file")
                 kwargs["start_callback"]()
                 return manifest
 
@@ -43,16 +50,20 @@ class ReportParserTests(unittest.TestCase):
                 with patch("chipathon2026_integration.fullchip_lvs_cli.download_projects", side_effect=download):
                     self.assertEqual(download_main(argv), 1)
                 records = audit.parse_download_report(report or root / "data/download.report")
+                import hashlib
+                report_text = (report or root / "data/download.report").read_text()
+                self.assertEqual(report_text.count(": " + hashlib.sha256(b"test file").hexdigest()), 4)
                 self.assertEqual([record.team for record in records], ["A02", "A01", "A03"])
-                self.assertEqual(records[0].info_yaml, str(root / "data/A02_failed/info.yaml"))
+                self.assertEqual(records[0].info_yaml, "info.yaml")
                 self.assertEqual(records[2].info_yaml, "none")
                 records = [records[1], records[0]]
                 self.assertTrue(records[0].successful)
                 self.assertEqual(records[0].top_layout, "top")
-                self.assertEqual(records[0].fields["lvs_config"], str(root / "data/A01/checks/lvs_config.json"))
+                self.assertEqual(records[0].fields["lvs_config"], "checks/lvs_config.json")
                 self.assertEqual(records[0].fields["export_control"], "none")
-                self.assertEqual(records[0].info_yaml, str(root / "data/A01/info.yaml"))
-                self.assertEqual(records[0].gds_saved, str(root / "data/A01/gds/top.gds"))
+                self.assertEqual(records[0].info_yaml, "info.yaml")
+                self.assertEqual(records[0].fields["project_root"], str(root / "data/A01"))
+                self.assertEqual(records[0].gds_saved, "gds/top.gds")
                 self.assertFalse(records[1].successful)
                 self.assertEqual(records[1].fields["ERROR"], "missing file second line")
                 self.assertTrue((root / "data/download_manifest.json").is_file())
