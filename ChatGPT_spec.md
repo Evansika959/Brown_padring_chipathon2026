@@ -984,6 +984,25 @@ inside `chipathon2026-system` by the
 `chipathon2026_integration.fullchip_lvs_cli:download_main` entry point. It is
 not a program in the parent directory.
 
+The command automatically writes a legacy-compatible `data_root/download.report`
+alongside `download_manifest.json`. `--report PATH` overrides the report path.
+Each successful `TEAM: repository` record contains indented `info.yaml`,
+`TOP_LAYOUT`, and `GDS saved` fields, with absolute artifact paths and the
+resolved layout top name. Failed records contain `ERROR` and no `GDS saved`.
+Records follow repository-list order, including failures, followed by
+`Successful` and `Failed` counts. Every record includes `info.yaml` with the
+absolute saved path (including retained failed-project paths), or `none` when
+no file was saved. The report is written for partial-success runs too; report-write
+failure makes the command fail. Progress logs remain separate from the report.
+Each record includes `lvs_config` and `export_control` lines with absolute
+downloaded paths. Export control is `none` if undeclared and
+`NOT FOUND: filename` if declared but unavailable; such a download failure
+still fails the project. Failed records retain available paths, including
+relocated LVS configurations. Unread metadata uses `unknown`, invalid export
+declarations use `invalid: value`, and missing declared LVS configurations
+use `NOT FOUND: filename`.
+The detailed report contract is specified in integration_spec.md section 19.3.
+
 For every repository-list project, inspect the optional
 `project.export_control` key in `info.yaml`. When present, it must name one
 nonempty, safe repository-relative document path. For both this key and

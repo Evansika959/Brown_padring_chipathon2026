@@ -232,13 +232,15 @@ def test_unified_download_preserves_repository_paths_and_replaces_team_trees(tmp
     assert (data / "B02/layout/B02_core.gds").is_file()
     assert all(item["revision"] == "a" * 40 for item in manifest["projects"])
     a01 = next(item for item in manifest["projects"] if item["team"] == "A01")
+    assert a01["top_layout"] == "core"
     assert a01["export_control"]["repository_path"] == "docs/export.pdf"
     b02 = next(item for item in manifest["projects"] if item["team"] == "B02")
     assert b02["export_control"] is None
 
 
+@pytest.mark.parametrize("missing_export", [False, True])
 def test_failed_project_preserves_partial_tree_and_export_document(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, missing_export,
 ):
     data = tmp_path / "data"
     repo_list = tmp_path / "repo.list"
@@ -252,6 +254,8 @@ def test_failed_project_preserves_partial_tree_and_export_document(
                 b"  lvs_config: missing.json\n"
             )
         if path == "docs/export.pdf":
+            if missing_export:
+                raise ConfigError("docs/export.pdf is missing")
             return b"controlled document"
         raise ConfigError(f"{path} is missing")
 
@@ -274,6 +278,17 @@ def test_failed_project_preserves_partial_tree_and_export_document(
     assert manifest["status"] == "partial"
     assert not (data / "A01").exists()
     assert (data / "A01_failed/info.yaml").is_file()
+    from chipathon2026_integration.fullchip_lvs_cli import write_download_report
+    report = tmp_path / "download.report"
+    write_download_report(report, manifest)
+    text = report.read_text()
+    assert f"  info.yaml: {(data / 'A01_failed/info.yaml').resolve()}" in text
+    assert "  lvs_config: NOT FOUND: missing.json" in text
+    if missing_export:
+        assert "  export_control: NOT FOUND: docs/export.pdf" in text
+        assert not manifest["failures"][0]["retained_export_control"]
+        return
+    assert f"  export_control: {(data / 'export_control/A01_export.pdf').resolve()}" in text
     assert (data / "export_control/A01_export.pdf").read_bytes() == (
         b"controlled document"
     )
@@ -353,6 +368,7 @@ def test_malformed_info_is_reported_purged_and_other_projects_continue(tmp_path:
     assert (data / "B02/gds/good.gds").is_file()
     assert manifest["status"] == "partial"
     assert manifest["failures"][0]["team"] == "A01"
+    assert manifest["repository_order"] == ["A01", "B02"]
 
 
 @pytest.mark.parametrize("unsafe", [False, True])

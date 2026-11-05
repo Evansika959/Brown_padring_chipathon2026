@@ -265,6 +265,30 @@ padring and project DEF are written for every minimum-area fitting block type.
 chipathon-download-data repo.list --data-root data
 ```
 
+This also writes `data/download_manifest.json` and a legacy-compatible
+`data/download.report` for existing GDS audit scripts. To keep the report at
+the old location, use:
+
+```bash
+chipathon-download-data repo.list --data-root data --report download.report
+python3 scripts/gds_project_audit.py download.report -o gds_project_audit.csv
+```
+
+The report uses absolute artifact paths and includes successful and failed
+projects. Failed projects have no `GDS saved` entry and are skipped by the
+audit. Progress logs remain on the console; `tee` is no longer needed to
+create the report. Reports are written after project processing completes,
+including runs with individual project failures.
+Records follow `repo.list` order, including failed designs. Every record has
+an `info.yaml` line with the absolute saved path, including retained files in
+`<TEAM>_failed` after a later error, or `none` if no file was saved.
+Each record includes `lvs_config` and `export_control` lines. Downloaded files
+use absolute paths. Export control is `none` when absent from `info.yaml`, or
+`NOT FOUND: filename` when declared but unavailable (the project still fails).
+Failed records preserve these details and point to retained files where available.
+`unknown` means the project failed before its metadata could be read; invalid
+export-control entries are marked `invalid: value`.
+
 When `project.export_control` is present in a project's `info.yaml`, its
 repository-relative document is saved as
 `data/export_control/<TEAM>_<original-filename>`.

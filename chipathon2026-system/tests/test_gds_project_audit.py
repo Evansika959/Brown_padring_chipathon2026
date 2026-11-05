@@ -7,9 +7,56 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import gds_project_audit as audit
+from chipathon2026_integration.fullchip_lvs_cli import download_main
 
 
 class ReportParserTests(unittest.TestCase):
+    def test_download_cli_writes_compatible_report(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            manifest = {
+                "repository_order": ["A02", "A01", "A03"],
+                "projects": [{
+                    "team": "A01", "repository": "owner/good", "top_layout": "top",
+                    "info": {"local_path": str(root / "data/A01/info.yaml")},
+                    "lvs_config": {"local_path": str(root / "data/A01/checks/lvs_config.json")},
+                    "layout_file": {"local_path": str(root / "data/A01/gds/top.gds")},
+                }],
+                "failures": [
+                    {"team": "A02", "repository": "owner/bad", "error": "missing file\nsecond line",
+                     "info": {"local_path": str(root / "data/A02_failed/info.yaml")}},
+                    {"team": "A03", "repository": "owner/missing", "error": "no info"},
+                ],
+            }
+
+            def download(*args, **kwargs):
+                (root / "data").mkdir(exist_ok=True)
+                kwargs["start_callback"]()
+                return manifest
+
+            for report in (None, root / "reports/custom.report"):
+                argv = [str(root / "repo.list"), "--data-root", str(root / "data")]
+                if report:
+                    argv.extend(["--report", str(report)])
+                with patch("chipathon2026_integration.fullchip_lvs_cli.download_projects", side_effect=download):
+                    self.assertEqual(download_main(argv), 1)
+                records = audit.parse_download_report(report or root / "data/download.report")
+                self.assertEqual([record.team for record in records], ["A02", "A01", "A03"])
+                self.assertEqual(records[0].info_yaml, str(root / "data/A02_failed/info.yaml"))
+                self.assertEqual(records[2].info_yaml, "none")
+                records = [records[1], records[0]]
+                self.assertTrue(records[0].successful)
+                self.assertEqual(records[0].top_layout, "top")
+                self.assertEqual(records[0].fields["lvs_config"], str(root / "data/A01/checks/lvs_config.json"))
+                self.assertEqual(records[0].fields["export_control"], "none")
+                self.assertEqual(records[0].info_yaml, str(root / "data/A01/info.yaml"))
+                self.assertEqual(records[0].gds_saved, str(root / "data/A01/gds/top.gds"))
+                self.assertFalse(records[1].successful)
+                self.assertEqual(records[1].fields["ERROR"], "missing file second line")
+                self.assertTrue((root / "data/download_manifest.json").is_file())
+
     def test_report_parser(self):
         text = """\
 A01: example/repo

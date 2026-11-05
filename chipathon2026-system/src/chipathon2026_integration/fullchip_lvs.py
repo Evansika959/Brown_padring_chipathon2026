@@ -241,7 +241,9 @@ def _recreate_data_root(data_root: Path) -> None:
 
 def _download_project(
     session: requests.Session, repo: Repository, data_root: Path,
+    report_fields: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    report_fields = report_fields if report_fields is not None else {}
     team_root = data_root / repo.team
     print(f"[{repo.team}] locating {repo.name}:info.yaml", flush=True)
     branch = "main"
@@ -269,9 +271,15 @@ def _download_project(
     if not isinstance(project, dict):
         raise ConfigError("info.yaml project must be a mapping")
 
+    report_fields["export_control"] = "none"
+    lvs_entry = project.get("lvs_config")
+    if isinstance(lvs_entry, str) and lvs_entry.strip():
+        report_fields["lvs_config"] = "NOT FOUND: " + lvs_entry.strip()
+
     export_control = None
     if "export_control" in project:
         export_reference = project["export_control"]
+        report_fields["export_control"] = "invalid: " + str(export_reference)
         if not isinstance(export_reference, str) or not export_reference.strip():
             raise ConfigError(
                 "info.yaml project.export_control must be a nonempty "
@@ -280,6 +288,7 @@ def _download_project(
         export_reference = _safe_repo_relative(
             export_reference, "project.export_control"
         )
+        report_fields["export_control"] = "NOT FOUND: " + export_reference
         export_path = (
             data_root / "export_control"
             / f"{repo.team}_{PurePosixPath(export_reference).name}"
@@ -294,6 +303,7 @@ def _download_project(
         )
         export_path.parent.mkdir(parents=True, exist_ok=True)
         export_path.write_bytes(export_data)
+        report_fields["export_control"] = str(export_path.resolve())
         export_control = {
             "repository_path": export_reference,
             "local_path": str(export_path),
@@ -310,6 +320,7 @@ def _download_project(
     lvs_path = team_root / lvs_reference
     lvs_path.parent.mkdir(parents=True, exist_ok=True)
     lvs_path.write_bytes(lvs_data)
+    report_fields["lvs_config"] = str(lvs_path.resolve())
     try:
         config = json.loads(lvs_data)
     except json.JSONDecodeError as exc:
@@ -380,6 +391,7 @@ def _download_project(
     return {
         "team": repo.team, "repository": repo.name, "ref": branch,
         "revision": revision,
+        "top_layout": resolve_json_variables(config).get("TOP_LAYOUT", ""),
         "info": {"repository_path": "info.yaml",
                  "local_path": str(team_root / "info.yaml"),
                  "size": len(info_data),
@@ -420,8 +432,9 @@ def download_projects(
     for repo in repositories:
         team_root = data_root / repo.team
         failed_root = data_root / f"{repo.team}_failed"
+        report_fields = {"export_control": "unknown", "lvs_config": "unknown"}
         try:
-            projects.append(_download_project(session, repo, data_root))
+            projects.append(_download_project(session, repo, data_root, report_fields))
         except (ConfigError, OSError, requests.RequestException,
                 subprocess.CalledProcessError, ValueError) as exc:
             message = str(exc)
@@ -439,6 +452,11 @@ def download_projects(
                         f"{failed_root}"
                     )
                 os.replace(team_root, failed_root)
+                lvs_report = report_fields["lvs_config"]
+                if lvs_report.startswith(str(team_root.resolve()) + os.sep):
+                    report_fields["lvs_config"] = str(
+                        failed_root.resolve() / Path(lvs_report).relative_to(team_root.resolve())
+                    )
             export_root = data_root / "export_control"
             prefix = f"{repo.team}_"
             retained_export_control = sorted(
@@ -452,11 +470,15 @@ def download_projects(
                 "error": message,
                 "failed_path": str(failed_root) if failed_root.exists() else None,
                 "retained_export_control": retained_export_control,
+                "info": {"local_path": str(failed_root / "info.yaml")}
+                if (failed_root / "info.yaml").is_file() else None,
+                "report_fields": report_fields,
             })
     return {
         "schema_version": 1, "repo_list": str(repo_list),
         "status": "partial" if failures else "complete",
         "projects": projects, "failures": failures,
+        "repository_order": [repo.team for repo in repositories],
     }
 
 

@@ -27,6 +27,43 @@ def _format_elapsed(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{milliseconds:03d}"
 
 
+def write_download_report(path: Path, manifest: dict) -> None:
+    """Write the legacy GDS report consumed by existing audit scripts."""
+    def single_line(value: object) -> str:
+        return " ".join(str(value).splitlines())
+
+    lines = []
+    entries = {entry["team"]: entry for entry in (*manifest["projects"], *manifest["failures"])}
+    for team in manifest.get("repository_order", entries):
+        project = entries[team]
+        if "error" in project:
+            fields = project.get("report_fields", {})
+            info = project.get("info")
+            lines.extend([
+                f'{project["team"]}: {single_line(project["repository"])}',
+                f'  info.yaml: {Path(info["local_path"]).resolve() if info else "none"}',
+                f'  lvs_config: {single_line(fields.get("lvs_config", "unknown"))}',
+                f'  export_control: {single_line(fields.get("export_control", "unknown"))}',
+                f'  ERROR: {single_line(project["error"])}',
+            ])
+            continue
+        export = project.get("export_control")
+        lines.extend([
+            f'{project["team"]}: {single_line(project["repository"])}',
+            f'  info.yaml: {Path(project["info"]["local_path"]).resolve()}',
+            f'  lvs_config: {Path(project["lvs_config"]["local_path"]).resolve()}',
+            f'  export_control: {Path(export["local_path"]).resolve() if export else "none"}',
+            f'  TOP_LAYOUT: {single_line(project["top_layout"])}',
+            f'  GDS saved: {Path(project["layout_file"]["local_path"]).resolve()}',
+        ])
+    lines.extend([
+        f'Successful: {len(manifest["projects"])}',
+        f'Failed: {len(manifest["failures"])}',
+    ])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _print_download_summary(manifest: dict, data_root: Path, elapsed: float) -> None:
     projects = manifest.get("projects", [])
     failures = manifest.get("failures", [])
@@ -129,6 +166,7 @@ def download_main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Download all Chipathon project data from repo.list")
     p.add_argument("repo_list", type=Path)
     p.add_argument("--data-root", type=Path, default=Path("data"))
+    p.add_argument("--report", type=Path, help="legacy GDS report path (default: DATA_ROOT/download.report)")
     p.add_argument("--yes", action="store_true")
     args = p.parse_args(sys.argv[1:] if argv is None else argv)
     started = None
@@ -143,6 +181,7 @@ def download_main(argv: list[str] | None = None) -> int:
             start_callback=mark_download_started,
         )
         json_dump(args.data_root / "download_manifest.json", manifest)
+        write_download_report(args.report or args.data_root / "download.report", manifest)
         _print_download_summary(manifest, args.data_root, time.perf_counter() - started)
         return 1 if manifest["failures"] else 0
     except (IntegrationError, OSError, ValueError, requests.RequestException,
