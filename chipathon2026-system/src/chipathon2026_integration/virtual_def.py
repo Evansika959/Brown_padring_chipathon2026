@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 import yaml
 
+from .block_data import BLOCK_DATA_PATH, BLOCK_VARIANTS, BlockVariant, load_block_variants
 from .constants import CELL_PROJECT_TERMINALS, GROUND_CELL, POWER_CELL, SPEC_BLOB_SHA
 from .defparse import DefComponent, DefPin, DefRect, load_def
 from .errors import ConfigError
@@ -19,80 +20,6 @@ GF180_ROUTING_LAYERS = ("Metal1", "Metal2", "Metal3", "Metal4", "Metal5")
 BUS_SUFFIX_RE = re.compile(r"(?P<suffix>(?:\[-?\d+\])+)$")
 
 
-@dataclass(frozen=True)
-class BlockVariant:
-    code: str
-    slots: tuple[str, ...]
-    origin: tuple[Decimal, Decimal]
-    width: Decimal
-    height: Decimal
-    area: int
-    blockages: tuple[tuple[Decimal, Decimal, Decimal, Decimal], ...] = ()
-    metal2_blockages: tuple[tuple[Decimal, Decimal, Decimal, Decimal], ...] = ()
-
-
-def _slots(*ranges: str) -> tuple[str, ...]:
-    result: list[str] = []
-    for value in ranges:
-        side = value[0]
-        start, end = (int(part[1:]) for part in value.split("-"))
-        step = 1 if end >= start else -1
-        result.extend(f"{side}{number:02d}" for number in range(start, end + step, step))
-    return tuple(result)
-
-
-BLOCK_VARIANTS = {
-    v.code: v
-    for v in (
-        BlockVariant("A", _slots("W12-W22", "N01-N11"), (Decimal(350), Decimal(1475)), Decimal(1110), Decimal(1110), 1_232_100),
-        BlockVariant(
-            "BV", _slots("W12-W22", "N01-N05"), (Decimal(350), Decimal(1475)),
-            Decimal(550), Decimal(1110), 610_500,
-            metal2_blockages=((Decimal(529), Decimal(1108), Decimal(550), Decimal(1110)),),
-        ),
-        BlockVariant(
-            "BH", _slots("W18-W22", "N01-N11"), (Decimal(350), Decimal(2035)),
-            Decimal(1110), Decimal(550), 610_500,
-            metal2_blockages=((Decimal(0), Decimal(0), Decimal(2), Decimal(21)),),
-        ),
-        BlockVariant("CH", _slots("W12-W17"), (Decimal(350), Decimal(1475)), Decimal(1110), Decimal(550), 610_500),
-        BlockVariant("CV", _slots("N06-N11"), (Decimal(910), Decimal(1475)), Decimal(550), Decimal(1110), 610_500),
-        BlockVariant(
-            "D", _slots("W18-W22", "N01-N05"), (Decimal(350), Decimal(2035)),
-            Decimal(550), Decimal(550), 302_500,
-            metal2_blockages=(
-                (Decimal(529), Decimal(548), Decimal(550), Decimal(550)),
-                (Decimal(0), Decimal(0), Decimal(2), Decimal(21)),
-            ),
-        ),
-        BlockVariant("EV", _slots("N06-N11"), (Decimal(910), Decimal(2035)), Decimal(550), Decimal(550), 302_500),
-        BlockVariant("EH", _slots("W12-W17"), (Decimal(350), Decimal(1475)), Decimal(550), Decimal(550), 302_500),
-        BlockVariant(
-            "ACV", _slots("W12-W22", "N01-N16"), (Decimal(350), Decimal(1475)),
-            Decimal(1675), Decimal(1110), 1_859_250,
-            metal2_blockages=((Decimal(1610), Decimal(1108), Decimal(1675), Decimal(1110)),),
-        ),
-        BlockVariant(
-            "ACH", _slots("W07-W22", "N01-N11"), (Decimal(350), Decimal(910)),
-            Decimal(1110), Decimal(1675), 1_859_250,
-            metal2_blockages=((Decimal(0), Decimal(0), Decimal(2), Decimal(65)),),
-        ),
-        BlockVariant(
-            "ACE", _slots("W07-W22", "N01-N16"), (Decimal(350), Decimal(910)),
-            Decimal(1675), Decimal(1675), 2_805_625,
-            metal2_blockages=(
-                (Decimal(1610), Decimal(1673), Decimal(1675), Decimal(1675)),
-                (Decimal(0), Decimal(0), Decimal(2), Decimal(65)),
-            ),
-        ),
-        BlockVariant(
-            "ACE2", _slots("W07-W22", "N01-N16", "E16-E01", "S22-S07"),
-            (Decimal(350), Decimal(350)), Decimal(2235), Decimal(2235), 5_308_750,
-            blockages=((Decimal(0), Decimal(0), Decimal(560), Decimal(560)),
-                       (Decimal(1675), Decimal(1675), Decimal(2235), Decimal(2235))),
-        ),
-    )
-}
 
 
 @dataclass(frozen=True)
@@ -140,11 +67,20 @@ def micron_to_dbu(value: Decimal | str | int | float, units: int, name: str) -> 
     return int(scaled)
 
 
+def block_size_fits(
+    variant: BlockVariant, width: Decimal, height: Decimal, block_type: str,
+) -> bool:
+    if width <= variant.width and height <= variant.height:
+        return True
+    return block_type == "digital" and width * height < Decimal("0.9") * variant.area
+
+
 def select_block_variants(
     *, project_width: Decimal | str | int | float,
     project_height: Decimal | str | int | float,
     pin_count: int,
     io_types: Iterable[str],
+    block_type: str = "unknown",
 ) -> tuple[BlockVariant, ...]:
     width, height = _decimal(project_width, "project width"), _decimal(project_height, "project height")
     if width <= 0 or height <= 0 or pin_count < 0:
@@ -154,15 +90,31 @@ def select_block_variants(
         raise ConfigError("ordered io_type count must match participant pin count")
     fitting = [
         variant for variant in BLOCK_VARIANTS.values()
-        if width <= variant.width
-        and height <= variant.height
+        if block_size_fits(variant, width, height, block_type)
         and pin_count <= len(variant.slots)
         and _variant_endpoint_eligible(variant, ordered_io_types)
     ]
     if not fitting:
         raise ConfigError(f"no block variant fits {width} x {height} microns and {pin_count} pins")
     minimum_area = min(variant.area for variant in fitting)
-    return tuple(variant for variant in fitting if variant.area == minimum_area)
+    selected = [variant for variant in fitting if variant.area == minimum_area]
+    if any(variant.code in {"BVE", "BHE"} for variant in selected):
+        selected.extend(variant for variant in fitting if variant.code == "A" and variant not in selected)
+    for corner in tuple(selected):
+        family = "E" if corner.code == "D" else "C" if corner.code.startswith("B") else None
+        if family is None:
+            continue
+        alternatives = [
+            variant for variant in fitting
+            if variant.code.startswith(family) and variant.area > corner.area
+        ]
+        if alternatives:
+            next_area = min(variant.area for variant in alternatives)
+            selected.extend(
+                variant for variant in alternatives
+                if variant.area == next_area and variant not in selected
+            )
+    return tuple(selected)
 
 
 def _variant_endpoint_eligible(variant: BlockVariant, io_types: tuple[str, ...]) -> bool:

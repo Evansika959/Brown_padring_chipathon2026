@@ -788,52 +788,23 @@ when another rectangle for that terminal remains.
 
 ## **24.1 Canonical user-block slot allocations**
 
-User-block pins advance in the exact order shown below. Within a range, pad
-numbers ascend unless the range explicitly descends. Comma-separated ranges
-are concatenated from left to right.
+The repository-root `blocks.data` tab-separated table is the authoritative
+source for DEF block variants. Load `Blocks`, `Pin order`, `Placement`,
+`width`, `height`, `Area`, and `block` at process startup, without hardcoded
+geometry fallbacks. Package the same table for installed commands.
+Padframe configuration and project DEF generation must use the same shared
+loader and slot allocations; no separate hardcoded padframe slot table is allowed.
 
-All origins, dimensions, and blockage coordinates are in microns. `Area` is
-the authoritative usable-area metric for configuration selection; in
-particular, ACE2 removes two 1/16 blocks and their spacing from the enclosing
-square.
-
-| Code | Pin order | Origin | Pin count | X | Y | Area | Block |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| A | W12-W22, N01-N11 | 350, 1475 | 22 | 1110 | 1110 | 1,232,100 | — |
-| BV | W12-W22, N01-N05 | 350, 1475 | 16 | 550 | 1110 | 610,500 | — |
-| BH | W18-W22, N01-N11 | 350, 2035 | 16 | 1110 | 550 | 610,500 | — |
-| CH | W12-W17 | 350, 1475 | 6 | 1110 | 550 | 610,500 | — |
-| CV | N06-N11 | 910, 1475 | 6 | 550 | 1110 | 610,500 | — |
-| D | W18-W22, N01-N05 | 350, 2035 | 10 | 550 | 550 | 302,500 | — |
-| EV | N06-N11 | 910, 2035 | 6 | 550 | 550 | 302,500 | — |
-| EH | W12-W17 | 350, 1475 | 6 | 550 | 550 | 302,500 | — |
-| ACV | W12-W22, N01-N16 | 350, 1475 | 27 | 1675 | 1110 | 1,859,250 | — |
-| ACH | W07-W22, N01-N11 | 350, 910 | 27 | 1110 | 1675 | 1,859,250 | — |
-| ACE | W07-W22, N01-N16 | 350, 910 | 32 | 1675 | 1675 | 2,805,625 | — |
-| ACE2 | W07-W22, N01-N16, E16-E01, S22-S07 | 350, 350 | 64 | 2235 | 2235 | 5,308,750 | (0,0)-(560,560) and (1675,1675)-(2235,2235) |
-
-For each rectangle in the `Block` column, the generated user DEF emits both a
-placement blockage and routing blockages covering every routing layer. These
-coordinates are local project coordinates. A dash means no blocked rectangle.
-
-The following additional corner blockages are routing blockages on Metal2
-only. They do not create placement blockages or block any other routing layer:
-
-| Variant | Local Metal2 blockage |
-| --- | --- |
-| BV | upper right: `(529,1108)-(550,1110)` |
-| BH | lower left: `(0,0)-(2,21)` |
-| D | upper right: `(529,548)-(550,550)` and lower left: `(0,0)-(2,21)` |
-| ACV | upper right: `(1610,1108)-(1675,1110)` |
-| ACH | lower left: `(0,0)-(2,65)` |
-| ACE | upper right: `(1610,1673)-(1675,1675)` and lower left: `(0,0)-(2,65)` |
-
-For BV, BH, and D, the corner length is 21 microns. For ACV, ACH, and
-ACE, the corner length is 65 microns. Every upper-right blockage is 2 microns
-high and touches the top and right DIEAREA boundaries. Every lower-left
-blockage is 2 microns wide and touches the left and bottom DIEAREA boundaries.
-All coordinates are in local project microns and must be converted exactly to
-the inherited DEF DBU.
+Pin ranges are inclusive, concatenated left to right, and may descend.
+`Pin order` determines the available slots. `Pin count` is required and must
+equal the number of expanded slots; mismatches and duplicate slots are errors.
+`utilization` is descriptive.
+Origins, dimensions, and blockage coordinates are exact decimal microns.
+`Area`, including thousands separators, is the authoritative selection metric.
+The `block` column contains local rectangles `x1,y1-x2,y2` separated by `&`;
+a blank value means no blockages. Each rectangle creates placement and
+routing blockages on all routing layers. Do not retain the former hardcoded
+Metal2 corner blockages absent from the table. Invalid tables fail explicitly.
 
 Generated DEF blockage rectangles use standards-compliant syntax with no `+`
 before `RECT`:
@@ -903,6 +874,26 @@ analog, mixed signal, or unknown. Geometry in any cell whose name contains `seco
 measurement. The semantic layers must be resolved through the configured PDK
 KLayout layer-properties file; do not substitute `pr_boundary` or hard-code
 another layer as a fallback.
+
+For each digital candidate, first accept when measured width and height both
+fit the variant dimensions. If either dimension exceeds its limit, accept only
+when measured bounding-box area (`width_microns * height_microns`) is strictly
+less than 90% of the variant's usable `Area` from `blocks.data`. Exactly 90%
+does not qualify for the fallback. Pin capacity and endpoint rules always apply;
+select every qualifying variant with minimum usable area. Analog, mixed-signal,
+unknown, and unclassified inputs retain dimension checks only. Automatic
+selection and explicit variant validation use the same policy.
+
+After selecting minimum-area variants, if D is selected, additionally generate
+the smallest strictly larger usable-area fitting E-family variants. If a
+B-family variant is selected, likewise add the smallest strictly larger fitting
+C-family variants. Include all ties without duplicates. Alternatives must
+satisfy the same size, pin-capacity, and endpoint criteria; if none fit, retain
+the corner selection alone. Automatic builds emit DEFs and interface maps for
+these additional variants too. Explicit `--variant` remains a single selection.
+When the minimum-area selection includes BVE or BHE, also generate A if A
+passes the same size, pin-capacity, and endpoint checks. Add it once, in
+addition to any fitting C-family alternatives.
 
 Use the measured physical bounding-box width and height, converted to microns
 using the GDS layout DBU, together with the participant pin count from

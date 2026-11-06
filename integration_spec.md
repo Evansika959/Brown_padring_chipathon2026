@@ -62,39 +62,57 @@ io_cells:
   ground: gf180mcu_fd_io__dvss
 
 block_variants:
+  EH:
+    origin_um: [350, 1475]
+    size_um: [605, 495]
+  EV:
+    origin_um: [965, 1980]
+    size_um: [495, 605]
+  EH2:
+    origin_um: [350, 965]
+    size_um: [495, 1225]
+  EV2:
+    origin_um: [965, 1980]
+    size_um: [1225, 495]
+  D:
+    origin_um: [350, 1980]
+    size_um: [605, 605]
+  CH:
+    origin_um: [350, 1475]
+    size_um: [1110, 495]
+  CH2:
+    origin_um: [350, 965]
+    size_um: [1110, 1225]
+  CV:
+    origin_um: [965, 1475]
+    size_um: [495, 1110]
+  CV2:
+    origin_um: [965, 1475]
+    size_um: [1225, 1110]
+  BV:
+    origin_um: [350, 1475]
+    size_um: [605, 1110]
+  BVE:
+    origin_um: [350, 965]
+    size_um: [605, 1620]
+  BH:
+    origin_um: [350, 1980]
+    size_um: [1110, 605]
+  BHE:
+    origin_um: [350, 1980]
+    size_um: [1620, 605]
   A:
     origin_um: [350, 1475]
     size_um: [1110, 1110]
-  BV:
-    origin_um: [350, 1475]
-    size_um: [550, 1110]
-  BH:
-    origin_um: [350, 2035]
-    size_um: [1110, 550]
-  CH:
-    origin_um: [350, 1475]
-    size_um: [1110, 550]
-  CV:
-    origin_um: [910, 1475]
-    size_um: [550, 1110]
-  D:
-    origin_um: [350, 2035]
-    size_um: [550, 550]
-  EV:
-    origin_um: [910, 2035]
-    size_um: [550, 550]
-  EH:
-    origin_um: [350, 1475]
-    size_um: [550, 550]
   ACV:
     origin_um: [350, 1475]
-    size_um: [1675, 1110]
+    size_um: [1620, 1110]
   ACH:
-    origin_um: [350, 910]
-    size_um: [1110, 1675]
+    origin_um: [350, 965]
+    size_um: [1110, 1620]
   ACE:
-    origin_um: [350, 910]
-    size_um: [1675, 1675]
+    origin_um: [350, 965]
+    size_um: [1620, 1620]
   ACE2:
     origin_um: [350, 350]
     size_um: [2235, 2235]
@@ -1073,3 +1091,20 @@ Outputs include:
 No downloaded participant source is modified in place.  A failed run retains
 diagnostic outputs but must mark them invalid and must not report the integrated
 design as LVS-clean.
+
+Project DEF geometry and selectable variants are loaded from the repository-root
+`blocks.data`. Digital projects first check width and height, falling back to
+measured bounding-box area strictly below 90% of usable `Area` only when
+dimensions do not fit. Pin capacity always applies; other block types retain
+dimension checks only. Endpoint requirements and minimum-area selection
+still apply. The measurement JSON supplies `block_type`.
+When D or B-family variants are selected, also generate the next larger fitting
+E-family or C-family variants, respectively, by usable area, including all ties.
+These alternatives must meet the same fit and pin requirements. A lack of
+fitting non-corner alternatives does not invalidate the corner selection.
+For selected BVE or BHE variants, also generate A when it meets the same fit
+and pin requirements, in addition to C-family alternatives, without duplicates.
+
+Project DEF geometry and selectable variants are loaded from the repository-root
+`blocks.data` TSV as specified in ChatGPT_spec.md section 24.1. Base-chip YAML
+geometry remains explicit and must include all variants from the table.

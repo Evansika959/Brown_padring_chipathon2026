@@ -334,3 +334,32 @@ pytest
 
 See `SPEC_GAPS.md` before treating any B-E block, package mapping, transform, or
 power-polarity behavior as finalized.
+
+## Block geometry
+
+When minimum-area selection includes corner block D or a B-family block, the
+build also emits the next larger fitting non-corner alternatives: E-family
+blocks for D and C-family blocks for B. The next size is determined by usable
+`Area`; all tied orientations are included. Alternatives must satisfy the same
+size, pin-capacity, and endpoint checks. If none fit, only the corner is emitted.
+When BVE or BHE is selected, also emit A if it meets the same fit and pin
+requirements. This is additional to the C-family alternatives.
+
+Digital project selection first checks width and height. When either dimension
+does not fit, the candidate can still qualify if measured bounding-box area
+(`width_microns * height_microns`) is strictly below 90% of its usable `Area`.
+Pin capacity and endpoint requirements always apply. Other block types retain
+dimension checks only. The measurement JSON's `block_type` determines the policy;
+absent classification retains dimension checks.
+
+Project DEF generation and variant selection load the repository-root
+`blocks.data` through the shared `block_data.py` loader. Padframe configuration
+uses the same validated slot allocations, including all 12 slots of block D.
+The TSV is accessed through the packaged `blocks.data` link. Edit this table to
+change sizes, origins, pin ranges, usable areas, or blockage rectangles; restart
+commands after changes. Installed packages include the table as package data.
+`Pin order` defines slots (inclusive ranges); the loader requires `Pin count`
+to match the number of expanded slots and rejects duplicate slots. Dimensions and
+placement are in microns. The `block` column uses `x1,y1-x2,y2 & ...` and creates
+placement and routing blockages on every routing layer. Blank means none.
+The example base-chip YAML mirrors this table for full-chip placement.

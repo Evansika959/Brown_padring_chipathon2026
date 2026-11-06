@@ -174,15 +174,15 @@ def test_chip_padring_merges_project_and_keeps_boundaries(tmp_path: Path):
     artifacts = SimpleNamespace(request=request, pins=pins)
     placement = SimpleNamespace(
         artifacts=artifacts,
-        transformed_slots=("E05", "E04", "E03"),
+        transformed_slots=("E06", "E05", "E04"),
     )
     chip = ChipRequest("demo", _base_chip(tmp_path), 10, (request,))
     cfg, mapping = generate_chip_padring(chip, [placement], template)
-    assert "PAD E03 E gf180mcu_fd_io__dvdd ;" in cfg
-    assert "PAD E04 E gf180mcu_fd_io__in_c ;" in cfg
-    assert "PAD E05 E gf180mcu_fd_io__dvss ;" in cfg
+    assert "PAD E04 E gf180mcu_fd_io__dvdd ;" in cfg
+    assert "PAD E05 E gf180mcu_fd_io__in_c ;" in cfg
+    assert "PAD E06 E gf180mcu_fd_io__dvss ;" in cfg
     assert cfg.count("BREAK ;") == 2
-    assert [pad["slot"] for pad in mapping["pads"] if not pad.get("generated")] == ["E03", "E04", "E05"]
+    assert [pad["slot"] for pad in mapping["pads"] if not pad.get("generated")] == ["E04", "E05", "E06"]
 
 
 def test_chip_padring_uses_base_chip_io_cell_mapping(tmp_path: Path):
@@ -195,13 +195,13 @@ def test_chip_padring_uses_base_chip_io_cell_mapping(tmp_path: Path):
     )
     placement = SimpleNamespace(
         artifacts=SimpleNamespace(request=request, pins=pins),
-        transformed_slots=("W18", "W19", "W20"),
+        transformed_slots=("W17", "W18", "W19"),
     )
     base = _base_chip(tmp_path)
     base.io_cells["input_cmos"] = "custom_input_cell"
     chip = ChipRequest("demo", base, 10, (request,))
     cfg, _ = generate_chip_padring(chip, [placement], template)
-    assert "PAD W19 W custom_input_cell ;" in cfg
+    assert "PAD W18 W custom_input_cell ;" in cfg
 
 
 @pytest.mark.parametrize(

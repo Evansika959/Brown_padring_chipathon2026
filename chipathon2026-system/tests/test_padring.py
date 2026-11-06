@@ -20,6 +20,22 @@ def test_safe_identifier():
     assert safe_identifier("12V!") == "_12V"
 
 
+def test_d_padframe_accepts_all_twelve_table_slots(full_template, minimal_info, tmp_path):
+    minimal_info["pins"] = [
+        {"name": "vdd", "io_type": "power"},
+        *[{"name": f"signal_{i}", "io_type": "input_cmos"} for i in range(10)],
+        {"name": "vss", "io_type": "ground"},
+    ]
+    _, mapping = generate_padring_config(
+        info=minimal_info, info_path=tmp_path / "info.yaml",
+        template_path=full_template, block="D",
+    )
+    assert [pad["slot"] for pad in mapping["pads"]] == [
+        "W17", "W18", "W19", "W20", "W21", "W22",
+        "N01", "N02", "N03", "N04", "N05", "N06",
+    ]
+
+
 def test_audit_valid_full_template(full_template):
     audit = audit_physical_template(full_template)
     assert audit["valid_for_production"]

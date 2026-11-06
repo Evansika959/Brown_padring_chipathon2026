@@ -19,6 +19,7 @@ from .defparse import load_def
 from .virtual_def import (
     BLOCK_VARIANTS,
     GF180_ROUTING_LAYERS,
+    block_size_fits,
     generate_project_def,
     load_mapping,
     mapped_pads,
@@ -233,13 +234,16 @@ def main(argv: list[str] | None = None) -> int:
                 project_height=project_height,
                 pin_count=len(pins),
                 io_types=(str(pin.get("io_type")) for pin in pins),
+                block_type=size_data.get("block_type", "unknown"),
             )
             if args.variant:
                 selected = BLOCK_VARIANTS[args.variant]
                 if selected not in fitting:
                     if (
-                        selected.width < Decimal(str(project_width))
-                        or selected.height < Decimal(str(project_height))
+                        not block_size_fits(
+                            selected, Decimal(str(project_width)), Decimal(str(project_height)),
+                            size_data.get("block_type", "unknown"),
+                        )
                         or len(selected.slots) < len(pins)
                     ):
                         raise IntegrationError(
@@ -287,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
                 project_height=project_height,
                 pin_count=len(pins),
                 io_types=(str(pin.get("io_type")) for pin in pins),
+                block_type=size_data.get("block_type", "unknown"),
             )
             layers = tuple(args.routing_layers or GF180_ROUTING_LAYERS)
             lef_paths = required_lef_paths(args.tech_pdk)
