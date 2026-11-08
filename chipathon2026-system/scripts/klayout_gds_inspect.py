@@ -246,29 +246,19 @@ def inspect(gds_path, top_name, layer_properties, std_cell_lefs):
     cell = _cell_by_name(layout, top_name)
 
     layer_index = _find_layer(layout, 0, 0)
-    if layer_index is None or int(layer_index) < 0:
-        raise RuntimeError(
-            "no layer 0/datatype 0 exists in GDS for TOP_LAYOUT %r" % top_name
-        )
-
-    # Include only shapes directly in TOP_LAYOUT; instantiated child geometry
-    # is intentionally excluded from the PR-boundary measurement.
     bbox = None
-    for shape in cell.shapes(layer_index).each():
-        shape_bbox = shape.bbox()
-        bbox = shape_bbox if bbox is None else bbox + shape_bbox
-
-    if bbox is None or bbox.empty():
-        raise RuntimeError(
-            "TOP_LAYOUT %r has no top-level shapes on layer 0/datatype 0"
-            % top_name
-        )
-
+    if layer_index is not None and int(layer_index) >= 0:
+        # PR boundary uses only shapes directly in TOP_LAYOUT.
+        for shape in cell.shapes(layer_index).each():
+            shape_bbox = shape.bbox()
+            bbox = shape_bbox if bbox is None else bbox + shape_bbox
     dbu = float(layout.dbu)
-    left = bbox.left * dbu
-    bottom = bbox.bottom * dbu
-    right = bbox.right * dbu
-    top = bbox.top * dbu
+    boundary = None
+    boundary_error = None
+    if bbox is None or bbox.empty():
+        boundary_error = "TOP_LAYOUT %r has no PR_bndry on layer 0/datatype 0" % top_name
+    else:
+        boundary = [bbox.left * dbu, bbox.bottom * dbu, bbox.right * dbu, bbox.top * dbu]
 
     counts = {}
     for layer in layout.layer_indexes():
@@ -289,9 +279,10 @@ def inspect(gds_path, top_name, layer_properties, std_cell_lefs):
         "ok": True,
         "top_cell": top_name,
         "dbu_um": dbu,
-        "boundary_bbox_um": [left, bottom, right, top],
-        "width_um": right - left,
-        "height_um": top - bottom,
+        "boundary_bbox_um": boundary,
+        "boundary_error": boundary_error,
+        "width_um": boundary[2] - boundary[0] if boundary else None,
+        "height_um": boundary[3] - boundary[1] if boundary else None,
         "text_counts": text_counts,
     }
     try:

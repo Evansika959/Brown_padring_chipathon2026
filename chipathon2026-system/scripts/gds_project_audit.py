@@ -166,6 +166,7 @@ class GdsInspection:
     computed_height_um: float | None = None
     block_type: str | None = None
     computed_error: str | None = None
+    boundary_error: str | None = None
 
 
 @dataclass
@@ -583,6 +584,7 @@ def inspect_gds(
             computed_height_um=payload.get("computed_height_um"),
             block_type=payload.get("block_type"),
             computed_error=payload.get("computed_error"),
+            boundary_error=payload.get("boundary_error"),
         )
 
 
@@ -873,6 +875,8 @@ def row_for_project(
                 layer_properties=layer_properties,
                 std_cell_lefs=std_cell_lefs,
             )
+            if inspection.boundary_error:
+                print(f"{record.team}: ERROR: {inspection.boundary_error}", file=sys.stderr)
             if inspection.computed_error:
                 project_errors.append(
                     f"computed content size unavailable: {inspection.computed_error}"

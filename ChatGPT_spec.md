@@ -1299,6 +1299,13 @@ default `0/0`. Missing, multiple, nonrectangular, or hierarchical-only boundary
 geometry is an error.
 
 `computed_width` and `computed_height` are the transformed physical-content
+bounding-box dimensions. Missing top-level PR_bndry on layer 0/datatype 0
+is a nonfatal diagnostic: print a team-qualified error, leave PR-boundary
+dimensions blank, and continue physical-content measurement and pin auditing.
+This diagnostic alone does not fail `--strict`; independent content or pin
+errors retain their normal failure behavior.
+
+`computed_width` and `computed_height` are the transformed physical-content
 bounding-box dimensions used for project-block selection. Standard-cell
 membership is defined exclusively by exact, case-sensitive GDS cell-name
 membership in the `MACRO` declarations of the configured standard-cell LEFs;

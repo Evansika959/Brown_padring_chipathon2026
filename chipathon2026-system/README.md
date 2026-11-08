@@ -337,6 +337,10 @@ power-polarity behavior as finalized.
 
 ## Block geometry
 
+GDS audits report missing PR_bndry as a console error and leave PR-boundary
+dimensions blank, while still measuring physical content and auditing pins.
+This diagnostic alone does not fail the audit, including `--strict`.
+
 When minimum-area selection includes corner block D or a B-family block, the
 build also emits the next larger fitting non-corner alternatives: E-family
 blocks for D and C-family blocks for B. The next size is determined by usable

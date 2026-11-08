@@ -14,7 +14,7 @@ KLAYOUT = shutil.which("klayout")
 pytestmark = pytest.mark.skipif(KLAYOUT is None, reason="KLayout is not installed")
 
 
-def _write_measurement_inputs(tmp_path: Path, scenario: str) -> tuple[Path, Path]:
+def _write_measurement_inputs(tmp_path: Path, scenario: str, *, missing_boundary=False) -> tuple[Path, Path]:
     gds = tmp_path / f"{scenario}.gds"
     generator = tmp_path / "create_gds.py"
     generator.write_text(
@@ -77,6 +77,10 @@ layout.write(gds)
 """,
         encoding="utf-8",
     )
+    if missing_boundary:
+        generator.write_text(generator.read_text().replace(
+            "top.shapes(outline).insert(pya.Box(0, 0, 100000, 100000))", ""
+        ))
     subprocess.run(
         [KLAYOUT, "-b", "-rd", f"scenario={scenario}", "-rd", f"output_gds={gds}", "-r", str(generator)],
         check=True, capture_output=True, text=True,
@@ -161,8 +165,9 @@ def test_mixed_signal_measurement_combines_standard_and_analog_geometry(tmp_path
     assert result["height_microns"] == "28"
 
 
-def test_audit_reports_pr_boundary_and_computed_content_sizes(tmp_path: Path):
-    gds, lef = _write_measurement_inputs(tmp_path, "analog")
+@pytest.mark.parametrize("missing_boundary", [False, True])
+def test_audit_reports_pr_boundary_and_computed_content_sizes(tmp_path: Path, missing_boundary):
+    gds, lef = _write_measurement_inputs(tmp_path, "analog", missing_boundary=missing_boundary)
     inspection = gds_project_audit.inspect_gds(
         klayout_exe=KLAYOUT,
         helper_script=Path(__file__).parents[1] / "scripts/klayout_gds_inspect.py",
@@ -171,7 +176,8 @@ def test_audit_reports_pr_boundary_and_computed_content_sizes(tmp_path: Path):
         layer_properties=tmp_path / "layers.lyp",
         std_cell_lefs=[lef],
     )
-    assert (inspection.width_um, inspection.height_um) == (100.0, 100.0)
+    assert (inspection.width_um, inspection.height_um) == ((None, None) if missing_boundary else (100.0, 100.0))
+    assert bool(inspection.boundary_error) == missing_boundary
     assert (inspection.computed_width_um, inspection.computed_height_um) == (6.0, 7.0)
     assert inspection.block_type == "analog"
     assert inspection.computed_error is None
