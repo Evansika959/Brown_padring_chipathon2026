@@ -79,7 +79,10 @@ layout.write(gds)
     )
     if missing_boundary:
         generator.write_text(generator.read_text().replace(
-            "top.shapes(outline).insert(pya.Box(0, 0, 100000, 100000))", ""
+            "top.shapes(outline).insert(pya.Box(0, 0, 100000, 100000))",
+            "top.shapes(outline).insert(pya.Box(0, 0, 100000, 100000))\n"
+            "top.shapes(outline).insert(pya.Box(0, 0, 50000, 50000))"
+            if missing_boundary == "multiple" else ""
         ))
     subprocess.run(
         [KLAYOUT, "-b", "-rd", f"scenario={scenario}", "-rd", f"output_gds={gds}", "-r", str(generator)],
@@ -112,8 +115,8 @@ layout.write(gds)
     return gds, lef
 
 
-def _measure(tmp_path: Path, scenario: str) -> dict:
-    gds, lef = _write_measurement_inputs(tmp_path, scenario)
+def _measure(tmp_path: Path, scenario: str, *, missing_boundary=False) -> dict:
+    gds, lef = _write_measurement_inputs(tmp_path, scenario, missing_boundary=missing_boundary)
     output = tmp_path / "size.json"
     script = Path(__file__).parents[1] / "scripts/measure_project_gds.py"
     subprocess.run(
@@ -130,13 +133,14 @@ def _measure(tmp_path: Path, scenario: str) -> dict:
     return json.loads(output.read_text(encoding="utf-8"))
 
 
-def test_digital_measurement_uses_non_tap_non_fill_standard_cells(tmp_path: Path):
-    result = _measure(tmp_path, "digital")
+@pytest.mark.parametrize("missing_boundary", [False, True, "multiple"])
+def test_digital_measurement_uses_non_tap_non_fill_standard_cells(tmp_path: Path, missing_boundary):
+    result = _measure(tmp_path, "digital", missing_boundary=missing_boundary)
     assert result["block_type"] == "digital"
     assert result["width_microns"] == "80"
     assert result["height_microns"] == "20"
     assert result["physical_bbox_microns"] == ["10", "20", "90", "40"]
-    assert result["prboundary_microns"] == ["0", "0", "100", "100"]
+    assert result["prboundary_microns"] == (None if missing_boundary else ["0", "0", "100", "100"])
 
 
 def test_measurement_does_not_require_a_device_layer_classification(tmp_path: Path):

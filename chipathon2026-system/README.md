@@ -340,6 +340,9 @@ power-polarity behavior as finalized.
 GDS audits report missing PR_bndry as a console error and leave PR-boundary
 dimensions blank, while still measuring physical content and auditing pins.
 This diagnostic alone does not fail the audit, including `--strict`.
+`measure_project_gds.py` also treats PR_bndry as optional metadata. Missing or
+malformed boundaries print a diagnostic and produce null `prboundary_dbu` and
+`prboundary_microns`; physical-content dimensions are still calculated normally.
 
 When minimum-area selection includes corner block D or a B-family block, the
 build also emits the next larger fitting non-corner alternatives: E-family

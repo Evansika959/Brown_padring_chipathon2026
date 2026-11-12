@@ -231,15 +231,19 @@ def main():
                 outline_rectangles.append(shape.polygon.bbox())
             else:
                 outline_other += 1
+    outline = None
     if len(outline_rectangles) != 1 or outline_other:
-        raise RuntimeError(
+        print(
             f"top cell {top.name!r} layer {outline_layer}/{outline_datatype} must contain "
             f"exactly one PR-boundary rectangle and no other shapes; found "
             f"{len(outline_rectangles)} rectangles and {outline_other} other shapes"
         )
-    outline = outline_rectangles[0]
-    if outline.width() <= 0 or outline.height() <= 0:
-        raise RuntimeError("project PR-boundary rectangle must have positive width and height")
+    else:
+        candidate = outline_rectangles[0]
+        if candidate.width() > 0 and candidate.height() > 0:
+            outline = candidate
+        else:
+            print("project PR-boundary rectangle has nonpositive width or height; continuing")
 
     dbu = layout.dbu
     result = {
@@ -254,11 +258,11 @@ def main():
         ],
         "prboundary_dbu": [
             outline.left, outline.bottom, outline.right, outline.top,
-        ],
+        ] if outline is not None else None,
         "prboundary_microns": [
             format(outline.left * dbu, ".12g"), format(outline.bottom * dbu, ".12g"),
             format(outline.right * dbu, ".12g"), format(outline.top * dbu, ".12g"),
-        ],
+        ] if outline is not None else None,
         "width_microns": format(bbox.width() * dbu, ".12g"),
         "height_microns": format(bbox.height() * dbu, ".12g"),
         "top_cell_text": [],

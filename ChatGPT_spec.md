@@ -849,7 +849,11 @@ Metal1 through Metal5 and can be overridden by repeating `--routing-layer`.
 
 The normal Makefile flow derives project width and height from the project's
 GDS rather than requiring manual dimensions. The GDS must have exactly one top
-cell. The `pr_boundary` layer is not used to derive project dimensions because
+cell. In `measure_project_gds.py`, PR_bndry is optional diagnostic metadata:
+missing, nonrectangular, multiple, or nonpositive boundaries must not abort
+physical-content measurement. Print a diagnostic and set `prboundary_dbu` and
+`prboundary_microns` to null when unavailable. Valid boundaries remain recorded.
+The `pr_boundary` layer is not used to derive project dimensions because
 it can describe the selected block size rather than the minimum physical size
 of the project content.
 
