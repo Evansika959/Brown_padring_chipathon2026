@@ -291,7 +291,7 @@ Shared export documents use `../export_control/filename`. The `Data root`
 header locates the data root relative to the report directory for auditing.
 Each record includes `lvs_config` and `export_control` lines. Downloaded files
 use project-relative paths. Export control is `none` when absent from `info.yaml`, or
-`NOT FOUND: filename` when declared but unavailable (the project still fails).
+`NOT FOUND: filename` when declared but unavailable (a warning; the project continues).
 Failed records preserve these details and point to retained files where available.
 `unknown` means the project failed before its metadata could be read; invalid
 export-control entries are marked `invalid: value`.
@@ -309,6 +309,14 @@ revision, relative to the containing file (or `$UPRJ_ROOT/` when specified).
 Paths may use `..` within the repository; paths escaping it are rejected.
 Repeated includes and cycles are downloaded once. Absolute and external
 variable-based include paths are left for the LVS environment to supply.
+Missing participant netlists or SPICE includes produce download warnings;
+only a missing `LAYOUT_FILE` target fails the project for files referenced by
+`lvs_config.json`. The GDS audit reports missing configured participant files
+and recursive SPICE includes in its errors column and console diagnostics,
+while continuing GDS inspection.
+The audit also flags configured pin names requiring Verilog backslash escaping
+(such as `Vin+`, `Vin-`, or reserved keywords) in console diagnostics and the CSV
+errors column. Numeric bus selects such as `data[0]` remain accepted.
 `LVS_SPICE_FILES_TO_FIX` is deprecated; a nonempty value is a project error.
 
 This command recreates `data` and downloads every project in `repo.list`: its

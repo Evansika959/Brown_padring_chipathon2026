@@ -329,3 +329,20 @@ def test_definitive_ace2_slot_order_and_corrected_blockage():
         [f"E{i:02d}" for i in range(16, 0, -1)] + [f"S{i:02d}" for i in range(22, 6, -1)]
     )
     assert variant.blockages[1] == (1620, 1620, 2235, 2235)
+
+
+@pytest.mark.parametrize("name", ["Vin-", "Vin+"])
+def test_project_def_preserves_differential_pin_signs(tmp_path, name):
+    mp, dp, lp = setup_files(tmp_path)
+    mapping = yaml.safe_load(mp.read_text())
+    mapping["pads"][0]["pin_name"] = name
+    mp.write_text(yaml.safe_dump(mapping))
+    text, metadata = generate_project_def(
+        mapping_path=mp, padring_def=dp, lef_paths=[lp], variant_code="D",
+        layout_texts=[name],
+    )
+    assert f"- {name} + NET {name} + DIRECTION INPUT" in text
+    assert name in {pin["project_pin"] for pin in metadata["pins"]}
+    assert _project_pin_name(name) == name
+    assert _project_pin_name(name, "PU") == f"{name}_PU"
+    assert _project_pin_name("Vin-") != _project_pin_name("Vin+")

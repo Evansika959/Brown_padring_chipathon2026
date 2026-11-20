@@ -142,10 +142,14 @@ def _download_lfs(session: requests.Session, repo: str, ref: str, oid: str, size
     return data
 
 
+class RepositoryFileNotFound(ConfigError):
+    """A requested repository file does not exist at the selected revision."""
+
+
 def get_repo_file(session: requests.Session, repo: str, ref: str, path: str) -> bytes:
     response = session.get(_raw_url(repo, ref, path), timeout=60)
     if response.status_code == 404:
-        raise ConfigError(f"{path} not found in {repo}@{ref}")
+        raise RepositoryFileNotFound(f"{path} not found in {repo}@{ref}")
     response.raise_for_status()
     pointer = _lfs_pointer(response.content)
     return response.content if pointer is None else _download_lfs(session, repo, ref, *pointer)
@@ -298,18 +302,25 @@ def _download_project(
             f"{export_reference} -> {export_path}",
             flush=True,
         )
-        export_data = get_repo_file(
-            session, repo.name, revision, export_reference
-        )
-        export_path.parent.mkdir(parents=True, exist_ok=True)
-        export_path.write_bytes(export_data)
-        report_fields["export_control"] = str(export_path.resolve())
-        export_control = {
-            "repository_path": export_reference,
-            "local_path": str(export_path),
-            "size": len(export_data),
-            "sha256": hashlib.sha256(export_data).hexdigest(),
-        }
+        try:
+            export_data = get_repo_file(
+                session, repo.name, revision, export_reference
+            )
+        except RepositoryFileNotFound:
+            print(
+                f"[{repo.team}] WARNING: export_control document not found: {export_reference}",
+                file=sys.stderr,
+            )
+        else:
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            export_path.write_bytes(export_data)
+            report_fields["export_control"] = str(export_path.resolve())
+            export_control = {
+                "repository_path": export_reference,
+                "local_path": str(export_path),
+                "size": len(export_data),
+                "sha256": hashlib.sha256(export_data).hexdigest(),
+            }
 
     lvs_reference = project.get("lvs_config")
     if not isinstance(lvs_reference, str) or not lvs_reference.strip():
@@ -330,14 +341,20 @@ def _download_project(
     _reject_deprecated_sources(config)
 
     downloaded_paths: set[str] = set()
+    missing_paths: set[str] = set()
     source_files: list[dict[str, Any]] = []
 
     def download_source(relative: str, *, spice: bool) -> None:
-        if relative in downloaded_paths:
+        if relative in downloaded_paths or relative in missing_paths:
             return
         destination = team_root / relative
         print(f"[{repo.team}] downloading {repo.name}@{revision}:{relative} -> {destination}", flush=True)
-        data = get_repo_file(session, repo.name, revision, relative)
+        try:
+            data = get_repo_file(session, repo.name, revision, relative)
+        except RepositoryFileNotFound:
+            missing_paths.add(relative)
+            print(f"[{repo.team}] WARNING: optional LVS source not found: {relative}", file=sys.stderr)
+            return
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
         downloaded_paths.add(relative)
@@ -397,6 +414,7 @@ def _download_project(
                  "size": len(info_data),
                  "sha256": hashlib.sha256(info_data).hexdigest()},
         "export_control": export_control,
+        "export_control_status": report_fields["export_control"],
         "lvs_config": {"repository_path": lvs_reference,
                        "local_path": str(lvs_path), "size": len(lvs_data),
                        "sha256": hashlib.sha256(lvs_data).hexdigest()},

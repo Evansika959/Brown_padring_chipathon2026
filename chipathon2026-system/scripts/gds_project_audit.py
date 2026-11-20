@@ -118,6 +118,35 @@ PROJECT_TYPE_LABELS = {
     "mixed_signal": "Mixed signal",
 }
 
+# IEEE 1364-2005 keywords. Bus suffixes below represent bit selects rather
+# than literal brackets in an identifier.
+VERILOG_KEYWORDS = frozenset("""
+always and assign automatic begin buf bufif0 bufif1 case casex casez cell
+cmos config deassign default defparam design disable edge else end endcase
+endconfig endfunction endgenerate endmodule endprimitive endspecify endtable
+endtask event for force forever fork function generate genvar highz0 highz1
+if ifnone incdir include initial inout input instance integer join large
+liblist library localparam macromodule medium module nand negedge nmos nor
+noshowcancelled not notif0 notif1 or output parameter pmos posedge primitive
+pull0 pull1 pulldown pullup pulsestyle_onevent pulsestyle_ondetect rcmos real
+realtime reg release repeat rnmos rpmos rtran rtranif0 rtranif1 scalared
+showcancelled signed small specify specparam strong0 strong1 supply0 supply1
+table task time tran tranif0 tranif1 tri tri0 tri1 triand trior trireg
+unsigned use uwire vectored wait wand weak0 weak1 while wire wor xnor xor
+""".split())
+VERILOG_PIN_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_$]*)(?:\[[0-9]+\])*")
+
+
+def verilog_pin_name_errors(pins: list[Pin]) -> list[str]:
+    errors = []
+    for pin in pins:
+        match = VERILOG_PIN_RE.fullmatch(pin.name)
+        if match is None or match.group(1) in VERILOG_KEYWORDS:
+            errors.append(
+                f"pin {pin.name!r} is invalid without a Verilog backslash escape"
+            )
+    return errors
+
 
 @dataclass
 class ReportRecord:
@@ -858,7 +887,9 @@ def row_for_project(
         try:
             info_data = load_info_data(info_path)
             readiness = readiness_fields(info_data)
+            project_errors.extend(lvs_file_errors(record, info_data, info_path))
             pins = pins_from_info_data(info_data)
+            project_errors.extend(verilog_pin_name_errors(pins))
             project_errors.extend(power_ground_group_errors(pins))
         except ProjectError as exc:
             project_errors.append(str(exc))
@@ -923,6 +954,49 @@ def row_for_project(
 
     totals = Counter(pin.pad_type for pin in pins)
     return row, totals, project_errors
+
+
+def lvs_file_errors(record: ReportRecord, info: dict[str, Any], info_path: Path) -> list[str]:
+    """Check participant files while leaving PDK/LVS environment paths alone."""
+    from chipathon2026_integration.errors import ConfigError
+    from chipathon2026_integration.fullchip_lvs import SOURCE_KEYS, _as_list, _repo_path
+    from chipathon2026_integration.lvs import load_lvs_config, resolve_json_variables
+
+    root = Path(record.fields.get("project_root", info_path.parent))
+    reference = record.fields.get("lvs_config") or info.get("project", {}).get("lvs_config")
+    if not reference:
+        return ["lvs_config.json path missing"]
+    reference = reference.replace("${UPRJ_ROOT}/", "").replace("$UPRJ_ROOT/", "")
+    config_path = resolve_report_path(reference, root)
+    errors: list[str] = []
+    visited: set[Path] = set()
+
+    def check(path: Path, key: str) -> None:
+        path = path.resolve()
+        if path in visited:
+            return
+        visited.add(path)
+        if not path.is_file():
+            errors.append(f"lvs_config.json {key} file not found: {path}")
+        elif key == "LVS_SPICE_FILES":
+            pattern = r'''(?im)^\s*\.(?:include|inc)\s+(?:"([^"]+)"|'([^']+)'|([^\s]+))'''
+            for match in re.finditer(pattern, path.read_text(encoding="utf-8", errors="replace")):
+                value = next(group for group in match.groups() if group is not None)
+                if value.startswith(("$UPRJ_ROOT/", "${UPRJ_ROOT}/")):
+                    check(root / value.split("/", 1)[1], key)
+                elif not value.startswith(("/", "$")):
+                    check(path.parent / value, key)
+
+    try:
+        config = resolve_json_variables(load_lvs_config(config_path))
+        for key in (*SOURCE_KEYS, "LAYOUT_FILE"):
+            for value in _as_list(config.get(key), key):
+                relative = _repo_path(value, {})
+                if relative is not None:
+                    check(root / relative, key)
+    except (ConfigError, OSError) as exc:
+        errors.append(str(exc))
+    return errors
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

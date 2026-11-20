@@ -241,7 +241,11 @@ def _project_pin_name(user_name: str, qualifier: str | None = None) -> str:
         base, suffix = user_name[:match.start()], match.group("suffix")
         if not base or "[" in base or "]" in base:
             raise ConfigError(f"malformed or non-trailing bus syntax in project pin {user_name!r}")
-    base_name = safe_identifier(base)
+    # Project terminals must retain their layout names, including differential
+    # signs such as Vin+ and Vin-. Sanitizing these collapses distinct pins.
+    if not base or re.search(r'[\s();"\\]', base):
+        raise ConfigError(f"unsupported characters in project pin {user_name!r}")
+    base_name = base
     return f"{base_name}_{qualifier}{suffix}" if qualifier else f"{base_name}{suffix}"
 
 

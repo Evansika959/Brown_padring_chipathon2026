@@ -5,6 +5,7 @@ import pytest
 
 from chipathon2026_integration.errors import ConfigError
 from chipathon2026_integration.fullchip_lvs import (
+    RepositoryFileNotFound,
     _recreate_data_root,
     download_projects,
     generate_lvs_configs,
@@ -255,7 +256,7 @@ def test_failed_project_preserves_partial_tree_and_export_document(
             )
         if path == "docs/export.pdf":
             if missing_export:
-                raise ConfigError("docs/export.pdf is missing")
+                raise RepositoryFileNotFound("docs/export.pdf is missing")
             return b"controlled document"
         raise ConfigError(f"{path} is missing")
 
@@ -466,3 +467,60 @@ def test_download_rejects_nonempty_spice_files_to_fix(
     assert "LVS_SPICE_FILES_TO_FIX is deprecated" in manifest["failures"][0]["error"]
     assert (data / "A01_failed/lvs_config.json").is_file()
     assert not (data / "A01_failed/cdl/fix.spice").exists()
+
+
+@pytest.mark.parametrize("missing", ["netlist/top.v", "cdl/child.spice", "gds/top.gds"])
+def test_download_only_missing_layout_is_fatal(tmp_path, monkeypatch, missing):
+    from chipathon2026_integration.fullchip_lvs import Repository, RepositoryFileNotFound, _download_project
+
+    config = {
+        "LAYOUT_FILE": "gds/top.gds",
+        "LVS_VERILOG_FILES": ["netlist/top.v"],
+        "LVS_SPICE_FILES": ["cdl/top.spice"],
+    }
+
+    def get_file(_session, _repo, _ref, path):
+        if path == missing:
+            raise RepositoryFileNotFound(f"{path} not found")
+        if path == "info.yaml":
+            return b"project:\n  lvs_config: lvs_config.json\n"
+        if path == "lvs_config.json":
+            return json.dumps(config).encode()
+        if path == "cdl/top.spice":
+            return b'.include "child.spice"\n'
+        return b"data"
+
+    monkeypatch.setattr("chipathon2026_integration.fullchip_lvs.get_repo_file", get_file)
+    monkeypatch.setattr("chipathon2026_integration.fullchip_lvs.resolve_repo_revision", lambda *_: "a" * 40)
+    if missing == "gds/top.gds":
+        with pytest.raises(RepositoryFileNotFound):
+            _download_project(None, Repository("A01", "owner/repo"), tmp_path)
+    else:
+        result = _download_project(None, Repository("A01", "owner/repo"), tmp_path)
+        assert Path(result["layout_file"]["local_path"]).is_file()
+        assert missing not in {item["repository_path"] for item in result["source_files"]}
+
+
+def test_missing_export_document_keeps_successful_project(tmp_path, monkeypatch, capsys):
+    from chipathon2026_integration.fullchip_lvs import Repository, _download_project
+    from chipathon2026_integration.fullchip_lvs_cli import write_download_report
+
+    def get_file(_session, _repo, _ref, path):
+        if path == "info.yaml":
+            return b"project:\n  lvs_config: lvs_config.json\n  export_control: docs/export.pdf\n"
+        if path == "docs/export.pdf":
+            raise RepositoryFileNotFound("document missing")
+        if path == "lvs_config.json":
+            return b'{"LAYOUT_FILE": "top.gds", "TOP_LAYOUT": "top"}'
+        return b"gds"
+
+    monkeypatch.setattr("chipathon2026_integration.fullchip_lvs.get_repo_file", get_file)
+    monkeypatch.setattr("chipathon2026_integration.fullchip_lvs.resolve_repo_revision", lambda *_: "a" * 40)
+    project = _download_project(None, Repository("A01", "owner/repo"), tmp_path)
+    assert Path(project["layout_file"]["local_path"]).is_file()
+    assert project["export_control"] is None
+    assert "WARNING: export_control document not found" in capsys.readouterr().err
+    report = tmp_path / "download.report"
+    write_download_report(report, {"data_root": str(tmp_path), "projects": [project], "failures": []})
+    assert "export_control: NOT FOUND: docs/export.pdf" in report.read_text()
+    assert "Successful: 1" in report.read_text()

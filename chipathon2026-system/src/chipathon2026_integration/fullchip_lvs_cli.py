@@ -62,7 +62,7 @@ def write_download_report(path: Path, manifest: dict) -> None:
             f'{project["team"]}: {single_line(project["repository"])}',
             f'  info.yaml: {file_field(project["info"]["local_path"])}',
             f'  lvs_config: {file_field(project["lvs_config"]["local_path"])}',
-            f'  export_control: {file_field(export["local_path"]) if export else "none"}',
+            f'  export_control: {file_field(export["local_path"]) if export else single_line(project.get("export_control_status", "none"))}',
             f'  TOP_LAYOUT: {single_line(project["top_layout"])}',
             f'  GDS saved: {file_field(project["layout_file"]["local_path"])}',
         ])

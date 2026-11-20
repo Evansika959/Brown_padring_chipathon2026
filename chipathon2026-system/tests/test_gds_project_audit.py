@@ -599,3 +599,47 @@ class MiscTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_audit_reports_missing_configured_files_and_spice_includes(tmp_path):
+    import json
+
+    (tmp_path / "top.spice").write_text('.inc "missing.spice"\n.include "top.spice"\n')
+    (tmp_path / "top.gds").write_bytes(b"gds")
+    (tmp_path / "lvs_config.json").write_text(json.dumps({
+        "NET": "$UPRJ_ROOT/missing.v",
+        "LVS_VERILOG_FILES": ["$NET", "$PDK_ROOT/external.v"],
+        "LVS_SPICE_FILES": ["./top.spice"],
+        "LAYOUT_FILE": "top.gds",
+    }))
+    errors = audit.lvs_file_errors(
+        audit.ReportRecord("A01", fields={"project_root": str(tmp_path), "lvs_config": "lvs_config.json"}),
+        {}, tmp_path / "info.yaml",
+    )
+    assert len(errors) == 2
+    assert any("LVS_VERILOG_FILES file not found:" in error and "missing.v" in error for error in errors)
+    assert any("LVS_SPICE_FILES file not found:" in error and "missing.spice" in error for error in errors)
+
+
+def test_verilog_pin_names_requiring_escapes_are_audit_errors():
+    invalid = ["Vin-", "Vin+", "1pin", "$pin", "a.b", "a/b", "a b", "module", "wire", "a[x]", "a[0]bad"]
+    errors = audit.verilog_pin_name_errors([audit.Pin(name, "analog") for name in invalid])
+    assert errors == [
+        f"pin {name!r} is invalid without a Verilog backslash escape" for name in invalid
+    ]
+    valid = ["Vin", "vin_p", "_pin", "a$b", "Module", "data[0]", "data[3][0]"]
+    assert audit.verilog_pin_name_errors([audit.Pin(name, "analog") for name in valid]) == []
+
+
+def test_row_reports_invalid_verilog_names_even_when_gds_inspection_fails(tmp_path):
+    (tmp_path / "info.yaml").write_text(
+        "pins:\n  - {name: 'Vin+', io_type: analog}\n  - {name: 'Vin-', io_type: analog}\n"
+    )
+    row, _, errors = audit.row_for_project(
+        audit.ReportRecord("A52", fields={"info.yaml": "info.yaml"}),
+        tmp_path, "klayout", tmp_path / "helper.py", True, tmp_path / "layers.lyp", [],
+    )
+    for name in ["Vin+", "Vin-"]:
+        message = f"pin {name!r} is invalid without a Verilog backslash escape"
+        assert message in errors
+        assert message in row["errors"]
