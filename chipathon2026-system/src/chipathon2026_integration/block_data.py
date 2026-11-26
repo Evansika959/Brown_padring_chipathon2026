@@ -81,3 +81,7 @@ def load_block_variants(path: Path) -> dict[str, BlockVariant]:
 BLOCK_DATA_PATH = Path(__file__).with_name("blocks.data")
 BLOCK_VARIANTS = load_block_variants(BLOCK_DATA_PATH)
 
+# Variants made for one chip floorplan (chip 13: CV8 / A20T / A21S). They are used only
+# when an integration request names them; select_block_variants never picks them, so
+# adding them does not change the automatic choice for any other project.
+MANUAL_ONLY_VARIANTS = frozenset({"CV8", "A20T", "A21S"})

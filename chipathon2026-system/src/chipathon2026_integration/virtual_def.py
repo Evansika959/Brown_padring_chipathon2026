@@ -8,7 +8,9 @@ from typing import Any, Iterable
 
 import yaml
 
-from .block_data import BLOCK_DATA_PATH, BLOCK_VARIANTS, BlockVariant, load_block_variants
+from .block_data import (
+    BLOCK_DATA_PATH, BLOCK_VARIANTS, MANUAL_ONLY_VARIANTS, BlockVariant, load_block_variants,
+)
 from .constants import CELL_PROJECT_TERMINALS, GROUND_CELL, POWER_CELL, SPEC_BLOB_SHA
 from .defparse import DefComponent, DefPin, DefRect, load_def
 from .errors import ConfigError
@@ -90,7 +92,8 @@ def select_block_variants(
         raise ConfigError("ordered io_type count must match participant pin count")
     fitting = [
         variant for variant in BLOCK_VARIANTS.values()
-        if block_size_fits(variant, width, height, block_type)
+        if variant.code not in MANUAL_ONLY_VARIANTS
+        and block_size_fits(variant, width, height, block_type)
         and pin_count <= len(variant.slots)
         and _variant_endpoint_eligible(variant, ordered_io_types)
     ]

@@ -127,6 +127,18 @@ def test_minimal_variant_selection_preserves_equal_area_placements():
     )[0].code == "A"
 
 
+def test_manual_only_variants_are_never_selected_automatically():
+    from chipathon2026_integration.block_data import MANUAL_ONLY_VARIANTS
+    assert MANUAL_ONLY_VARIANTS <= set(BLOCK_VARIANTS)
+    # each would be the smallest fit for one of these requests if it took part in the selection
+    for width, height, pins in (("600", "1050", 8), ("800", "1200", 20), ("1000", "1000", 21)):
+        variants = select_block_variants(
+            project_width=width, project_height=height, pin_count=pins,
+            io_types=["ground"] + ["input_cmos"] * (pins - 1),
+        )
+        assert not {variant.code for variant in variants} & MANUAL_ONLY_VARIANTS
+
+
 def test_variant_selection_enforces_endpoint_supply_pads():
     variants = select_block_variants(
         project_width="500", project_height="500", pin_count=5,
