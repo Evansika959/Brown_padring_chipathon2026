@@ -68,3 +68,12 @@ block_variants:
   ACE2:
     origin_um: [350, 350]
     size_um: [2235, 2235]
+  CV8:
+    origin_um: [965, 1475]
+    size_um: [805, 1110]
+  A20T:
+    origin_um: [350, 1370]
+    size_um: [805, 1215]
+  A21S:
+    origin_um: [350, 1575]
+    size_um: [1110, 1010]
